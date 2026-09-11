@@ -3,6 +3,7 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 
+from app.config import settings
 from app.prompts import load_system_prompt
 from app.schemas import ChatRequestMessage
 from app.services import answering, openai_client
@@ -27,7 +28,7 @@ async def test_cau_hoi_binh_thuong_tra_ve_status_ok(fake_openai):
     resp = await answering.answer_question(request())
     assert resp.status == "ok"
     assert not resp.answer.out_of_scope
-    assert resp.prompt_version == "v1"
+    assert resp.prompt_version == settings.prompt_version
     assert len(fake_openai.calls) == 1
 
 
@@ -47,7 +48,7 @@ async def test_cau_hoi_user_khong_bao_gio_bi_noi_vao_system_prompt(fake_openai):
     messages = fake_openai.calls[0]["messages"]
     system, user = messages[0], messages[1]
     assert system["role"] == "system" and content not in system["content"]
-    assert system["content"] == load_system_prompt("v1")
+    assert system["content"] == load_system_prompt(settings.prompt_version)
     assert user["role"] == "user"
     assert "<user_question>" in user["content"] and content in user["content"]
 

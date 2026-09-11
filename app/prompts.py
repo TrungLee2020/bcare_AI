@@ -19,20 +19,26 @@ PROMPT_DIR = Path(__file__).resolve().parent.parent / "prompts"
 LEAK_SHINGLE_SIZE = 8
 
 
-@lru_cache(maxsize=8)
-def load_system_prompt(version: str) -> str:
-    path = PROMPT_DIR / f"system_{version}.md"
+@lru_cache(maxsize=16)
+def load_prompt(kind: str, version: str) -> str:
+    """`kind` là tiền tố file: "system" -> prompts/system_<version>.md,
+    "summary" -> prompts/summary_<version>.md."""
+    path = PROMPT_DIR / f"{kind}_{version}.md"
     if not path.is_file():
         raise FileNotFoundError(
-            f"Không tìm thấy prompt version {version!r} tại {path}. "
-            f"Các version có sẵn: {', '.join(available_versions()) or 'không có'}"
+            f"Không tìm thấy prompt {kind!r} version {version!r} tại {path}. "
+            f"Các version có sẵn: {', '.join(available_versions(kind)) or 'không có'}"
         )
     return path.read_text(encoding="utf-8").strip()
 
 
-def available_versions() -> list[str]:
+def load_system_prompt(version: str) -> str:
+    return load_prompt("system", version)
+
+
+def available_versions(kind: str = "system") -> list[str]:
     return sorted(
-        p.stem.removeprefix("system_") for p in PROMPT_DIR.glob("system_*.md")
+        p.stem.removeprefix(f"{kind}_") for p in PROMPT_DIR.glob(f"{kind}_*.md")
     )
 
 

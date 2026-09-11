@@ -3,8 +3,9 @@ import logging
 from openai import AsyncOpenAI
 
 from app.config import settings
-from app.prompts import load_system_prompt
-from app.schemas import ChatAnswer
+from app.db.repository import ConversationContext
+from app.prompts import load_prompt, load_system_prompt
+from app.schemas import ChatAnswer, SessionSummary
 
 logger = logging.getLogger(__name__)
 
@@ -38,43 +39,93 @@ def set_openai(client) -> None:
     _client = client
 
 
-def _response_format() -> dict:
+def _response_format(name: str = "chat_answer", model=None) -> dict:
+    model = model or ChatAnswer
     return {
         "type": "json_schema",
         "json_schema": {
-            "name": "chat_answer",
+            "name": name,
             # strict=True mới thật sự ép được schema; thiếu cờ này thì
             # json_schema chỉ là gợi ý và model vẫn có thể trả thiếu field.
             "strict": True,
-            "schema": ChatAnswer.model_json_schema(),
+            "schema": model.model_json_schema(),
         },
     }
 
 
-def build_messages(content: str, prompt_version: str) -> list[dict]:
+def _as_question(content: str) -> str:
+    return f"<user_question>\n{content}\n</user_question>"
+
+
+def build_messages(
+    content: str, prompt_version: str, context: ConversationContext | None = None
+) -> list[dict]:
     """
     Câu hỏi của user được bọc trong <user_question> và đặt ở user turn riêng.
 
     Không bao giờ nối chuỗi câu hỏi vào system prompt: làm vậy là xoá ranh giới
     giữa "chỉ dẫn" và "dữ liệu", và mọi câu injection sẽ được model đọc với
     đúng thẩm quyền của system prompt.
+
+    Ngữ cảnh (summary + lịch sử) cũng theo đúng nguyên tắc đó. Summary đặc biệt
+    nguy hiểm vì nó là văn bản do MODEL sinh ra rồi được nạp lại vào prompt —
+    nếu nhét vào system turn thì một câu injection trong lịch sử có thể được
+    "rửa" qua bước tóm tắt để leo lên thành chỉ dẫn hệ thống. Vì vậy summary
+    luôn đi ở user turn, trong khối <session_summary>.
     """
-    return [
-        {"role": "system", "content": load_system_prompt(prompt_version)},
-        {"role": "user", "content": f"<user_question>\n{content}\n</user_question>"},
+    messages: list[dict] = [
+        {"role": "system", "content": load_system_prompt(prompt_version)}
     ]
 
+    if context is not None:
+        if context.summary:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": f"<session_summary>\n{context.summary}\n</session_summary>",
+                }
+            )
+        for past in context.recent:
+            if past.role == "user":
+                messages.append({"role": "user", "content": _as_question(past.content)})
+            else:
+                messages.append({"role": "assistant", "content": past.content})
 
-async def generate(content: str, prompt_version: str | None = None) -> ChatAnswer:
+    messages.append({"role": "user", "content": _as_question(content)})
+    return messages
+
+
+async def generate(
+    content: str,
+    prompt_version: str | None = None,
+    context: ConversationContext | None = None,
+) -> ChatAnswer:
     """Gọi OpenAI và parse ra ChatAnswer. Lỗi mạng/API được ném lên cho caller
     xử lý (retry + dead-letter là việc của Phase 5)."""
     version = prompt_version or settings.prompt_version
     completion = await get_openai().chat.completions.create(
         model=settings.openai_model,
-        messages=build_messages(content, version),
+        messages=build_messages(content, version, context),
         response_format=_response_format(),
         temperature=settings.openai_temperature,
         max_tokens=settings.openai_max_output_tokens,
     )
     raw = completion.choices[0].message.content or ""
     return ChatAnswer.model_validate_json(raw)
+
+
+async def summarize(transcript: str, prompt_version: str | None = None) -> SessionSummary:
+    """Nén các lượt cũ thành summary. Dùng prompt riêng (prompts/summary_*.md),
+    không dùng chung system prompt trả lời."""
+    version = prompt_version or settings.summary_prompt_version
+    completion = await get_openai().chat.completions.create(
+        model=settings.openai_model,
+        messages=[
+            {"role": "system", "content": load_prompt("summary", version)},
+            {"role": "user", "content": f"<transcript>\n{transcript}\n</transcript>"},
+        ],
+        response_format=_response_format("session_summary", SessionSummary),
+        temperature=settings.openai_temperature,
+        max_tokens=settings.openai_max_output_tokens,
+    )
+    return SessionSummary.model_validate_json(completion.choices[0].message.content or "")

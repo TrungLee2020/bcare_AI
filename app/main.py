@@ -5,6 +5,7 @@ from fastapi import FastAPI
 
 from app.api.chat import router as chat_router
 from app.config import settings
+from app.db.session import start_db, stop_db
 from app.kafka.consumer import start_consumer, stop_consumer
 from app.kafka.producer import publish_chat_request, start_producer, stop_producer
 from app.redis_client import start_redis, stop_redis
@@ -20,6 +21,7 @@ logging.basicConfig(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await start_redis()
+    await start_db()
     start_openai()
     await start_producer()
     start_consumer()
@@ -27,6 +29,7 @@ async def lifespan(app: FastAPI):
     await stop_consumer()
     await stop_producer()
     await stop_openai()
+    await stop_db()
     await stop_redis()
 
 

@@ -97,3 +97,14 @@ class ChatResponseMessage(BaseModel):
     # Lý do kỹ thuật khi bị chặn/lỗi — để log và dashboard, KHÔNG hiển thị cho user
     detail: str = ""
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class SessionSummary(BaseModel):
+    """Kết quả nén ngữ cảnh của 1 phiên (Phase 4)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str
+    # Các chủ đề sức khoẻ đã xuất hiện — để sau này dựng báo cáo/dashboard theo
+    # thời gian mà không phải đọc lại toàn bộ lịch sử.
+    health_topics: list[str]

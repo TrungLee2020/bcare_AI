@@ -8,7 +8,7 @@ from app.config import settings
 from app.kafka.producer import publish_chat_response
 from app.redis_client import get_redis
 from app.schemas import ChatRequestMessage, ChatResponseMessage
-from app.services import answering, idempotency, quota
+from app.services import answering, history, idempotency, quota
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,8 @@ async def _handle(message: ChatRequestMessage) -> None:
     chat_responses."""
     redis = get_redis()
     try:
-        response = await answering.answer_question(message)
+        context = await history.load_context(message)
+        response = await answering.answer_question(message, context)
     except Exception as exc:
         # Phase 5 sẽ thêm retry + backoff + dead-letter trước khi tới nước này.
         # Hiện tại: hoàn quota (user chưa nhận được câu trả lời nào) và vẫn
@@ -43,6 +44,25 @@ async def _handle(message: ChatRequestMessage) -> None:
     # vẫn lấy được câu trả lời qua API thay vì mất trắng.
     await idempotency.save_response(redis, message.request_id, response.model_dump(mode="json"))
     await publish_chat_response(response)
+
+    # Ghi lịch sử SAU khi publish: bước này có thể kéo theo một lần tóm tắt
+    # (gọi OpenAI, mất vài giây) — không được để nó làm chậm câu trả lời đang
+    # chờ ở phía user.
+    #
+    # Chỉ ghi lượt status="ok":
+    #   - "error" không có câu trả lời thật để lưu.
+    #   - "blocked" nếu lưu thì nguyên văn câu injection sẽ được chở lại trong
+    #     prompt của mọi câu hỏi sau trong phiên. Muốn phân tích các lần bị
+    #     chặn thì đọc log, không phải nhét vào ngữ cảnh.
+    if response.status == "ok":
+        try:
+            await history.record_turn(message, response)
+        except Exception:
+            # Câu trả lời đã tới tay user rồi; mất một dòng lịch sử không đáng
+            # để xử lý lại cả message (và tính tiền OpenAI thêm lần nữa).
+            logger.exception(
+                "Ghi lịch sử thất bại request_id=%s", message.request_id
+            )
 
 
 async def _consume_loop() -> None:

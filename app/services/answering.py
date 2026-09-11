@@ -7,6 +7,7 @@ Tách khỏi consumer để test được toàn bộ logic trả lời mà khôn
 import logging
 
 from app.config import settings
+from app.db.repository import ConversationContext
 from app.schemas import ChatAnswer, ChatRequestMessage, ChatResponseMessage
 from app.services import input_filter, openai_client, output_validator
 
@@ -25,9 +26,11 @@ BLOCKED_ANSWER = ChatAnswer(
 )
 
 
-async def answer_question(message: ChatRequestMessage) -> ChatResponseMessage:
+async def answer_question(
+    message: ChatRequestMessage, context: ConversationContext | None = None
+) -> ChatResponseMessage:
     """
-    Sinh câu trả lời cho 1 request. Lỗi gọi OpenAI được ném lên cho consumer
+    Sinh câu trả lời cho 1 request, có thể kèm ngữ cảnh hội thoại (Phase 4). Lỗi gọi OpenAI được ném lên cho consumer
     (retry/backoff/dead-letter là việc của Phase 5).
     """
     version = settings.prompt_version
@@ -59,7 +62,7 @@ async def answer_question(message: ChatRequestMessage) -> ChatResponseMessage:
         )
         return _response(BLOCKED_ANSWER, "blocked", ",".join(verdict.reasons))
 
-    raw_answer = await openai_client.generate(message.content, version)
+    raw_answer = await openai_client.generate(message.content, version, context)
 
     outcome = output_validator.validate(raw_answer, version)
     if not outcome.ok:

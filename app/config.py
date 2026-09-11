@@ -46,9 +46,23 @@ class Settings(BaseSettings):
 
     # Prompt version đang chạy (file prompts/system_<version>.md).
     # Đổi prompt = đổi biến này, không cần sửa code.
-    prompt_version: str = "v1"
+    prompt_version: str = "v2"
     # Chặn câu trả lời dài bất thường (dấu hiệu model lan man hoặc bị dẫn dắt)
     answer_max_chars: int = 2000
+
+    # Postgres (lịch sử chat)
+    database_url: str = "postgresql+asyncpg://bcare:bcare@localhost:5432/bcare"
+    db_pool_size: int = 5
+    db_max_overflow: int = 10
+
+    # Ngữ cảnh hội thoại: số message gần nhất chở nguyên văn vào prompt
+    # (10 message = 5 lượt hỏi-đáp). Tăng số này là tăng thẳng chi phí mỗi
+    # câu hỏi, nên đổi thì phải đo lại chi phí.
+    history_window_messages: int = 10
+    # Tóm tắt khi số message chưa tóm tắt vượt ngưỡng này
+    summary_trigger_messages: int = 20
+    summary_prompt_version: str = "v1"
+    summary_max_chars: int = 1500
 
     # Bật /test/enqueue (bypass quota, chỉ để verify pipeline Phase 1).
     # Mặc định TẮT — endpoint này bỏ qua quota nên không được bật ở production.
