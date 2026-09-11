@@ -5,14 +5,44 @@ from aiokafka import AIOKafkaConsumer
 from pydantic import ValidationError
 
 from app.config import settings
+from app.kafka.producer import publish_chat_response
 from app.redis_client import get_redis
-from app.schemas import ChatRequestMessage
-from app.services import idempotency
+from app.schemas import ChatRequestMessage, ChatResponseMessage
+from app.services import answering, idempotency, quota
 
 logger = logging.getLogger(__name__)
 
 _consumer_task: asyncio.Task | None = None
 _stop_event = asyncio.Event()
+
+
+async def _handle(message: ChatRequestMessage) -> None:
+    """Xử lý 1 câu hỏi: sinh câu trả lời, cache lại cho retry, publish sang
+    chat_responses."""
+    redis = get_redis()
+    try:
+        response = await answering.answer_question(message)
+    except Exception as exc:
+        # Phase 5 sẽ thêm retry + backoff + dead-letter trước khi tới nước này.
+        # Hiện tại: hoàn quota (user chưa nhận được câu trả lời nào) và vẫn
+        # publish 1 response status=error để SSE không treo chờ vô hạn.
+        logger.exception("Sinh câu trả lời thất bại request_id=%s", message.request_id)
+        await quota.refund(redis, message.user_id)
+        response = ChatResponseMessage(
+            request_id=message.request_id,
+            user_id=message.user_id,
+            session_id=message.session_id,
+            status="error",
+            answer=answering.ERROR_ANSWER,
+            prompt_version=settings.prompt_version,
+            model=settings.openai_model,
+            detail=type(exc).__name__,
+        )
+
+    # Cache trước khi publish: nếu publish lỗi thì client retry cùng request_id
+    # vẫn lấy được câu trả lời qua API thay vì mất trắng.
+    await idempotency.save_response(redis, message.request_id, response.model_dump(mode="json"))
+    await publish_chat_response(response)
 
 
 async def _consume_loop() -> None:
@@ -71,9 +101,7 @@ async def _consume_loop() -> None:
                     record.key,
                     len(message.content),
                 )
-                # TODO Phase 3: gọi OpenAI ở đây, publish kết quả sang chat_responses.
-                # Nếu lỗi, gọi idempotency.unmark_processing() để message
-                # được xử lý lại ở lần retry sau.
+                await _handle(message)
             except ValidationError:
                 # Message sai schema không nên làm chết cả consumer loop.
                 # Ở Phase 5 sẽ đẩy các message lỗi này sang 1 dead-letter topic

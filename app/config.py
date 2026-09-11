@@ -33,6 +33,23 @@ class Settings(BaseSettings):
     # retry hợp lý từ client, đủ ngắn để không phình Redis).
     dedup_ttl_seconds: int = 172800
 
+    # OpenAI
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o-mini"
+    # SLA trả lời đã chốt ở Phase 0; timeout phải nhỏ hơn timeout của SSE để
+    # client nhận được thông báo lỗi thay vì treo.
+    openai_timeout_seconds: float = 25.0
+    openai_max_output_tokens: int = 800
+    # Nhiệt độ thấp: đây là nội dung sức khoẻ/bảo hiểm, cần ổn định và bám sát
+    # hướng dẫn hơn là sáng tạo.
+    openai_temperature: float = 0.2
+
+    # Prompt version đang chạy (file prompts/system_<version>.md).
+    # Đổi prompt = đổi biến này, không cần sửa code.
+    prompt_version: str = "v1"
+    # Chặn câu trả lời dài bất thường (dấu hiệu model lan man hoặc bị dẫn dắt)
+    answer_max_chars: int = 2000
+
     # Bật /test/enqueue (bypass quota, chỉ để verify pipeline Phase 1).
     # Mặc định TẮT — endpoint này bỏ qua quota nên không được bật ở production.
     enable_test_endpoints: bool = False

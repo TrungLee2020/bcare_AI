@@ -8,6 +8,7 @@ from app.config import settings
 from app.kafka.consumer import start_consumer, stop_consumer
 from app.kafka.producer import publish_chat_request, start_producer, stop_producer
 from app.redis_client import start_redis, stop_redis
+from app.services.openai_client import start_openai, stop_openai
 from app.schemas import ChatRequestMessage
 
 logging.basicConfig(
@@ -19,11 +20,13 @@ logging.basicConfig(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await start_redis()
+    start_openai()
     await start_producer()
     start_consumer()
     yield
     await stop_consumer()
     await stop_producer()
+    await stop_openai()
     await stop_redis()
 
 

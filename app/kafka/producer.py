@@ -3,7 +3,7 @@ import logging
 from aiokafka import AIOKafkaProducer
 
 from app.config import settings
-from app.schemas import ChatRequestMessage
+from app.schemas import ChatRequestMessage, ChatResponseMessage
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,29 @@ async def publish_chat_request(message: ChatRequestMessage) -> None:
         "Published request_id=%s user_id=%s -> partition=%s offset=%s",
         message.request_id,
         message.user_id,
+        result.partition,
+        result.offset,
+    )
+
+
+async def publish_chat_response(message: ChatResponseMessage) -> None:
+    """
+    Publish câu trả lời lên topic chat_responses (tầng SSE sẽ đọc topic này).
+    Key vẫn là user_id để các câu trả lời của cùng 1 user giữ đúng thứ tự khi
+    SSE đẩy xuống client.
+    """
+    if _producer is None:
+        raise RuntimeError("Producer chưa được start (gọi start_producer() trước)")
+
+    result = await _producer.send_and_wait(
+        settings.kafka_topic_chat_responses,
+        value=message.model_dump_json().encode("utf-8"),
+        key=str(message.user_id).encode("utf-8"),
+    )
+    logger.info(
+        "Published response request_id=%s status=%s -> partition=%s offset=%s",
+        message.request_id,
+        message.status,
         result.partition,
         result.offset,
     )

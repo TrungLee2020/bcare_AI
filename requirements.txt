@@ -4,3 +4,4 @@ aiokafka>=0.11
 pydantic>=2.7
 pydantic-settings>=2.3
 redis>=5.0
+openai>=1.50
