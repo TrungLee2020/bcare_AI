@@ -6,12 +6,17 @@ Mục tiêu Phase 1 chỉ là verify pipeline chạy đúng, chưa gọi OpenAI.
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env   # sửa KAFKA_BOOTSTRAP_SERVERS nếu Kafka không chạy ở localhost:9092
-uvicorn app.main:app --reload
+cp .env.example .env   # sửa KAFKA_BOOTSTRAP_SERVERS / REDIS_URL nếu không chạy ở localhost
+python -m scripts.create_topics        # tạo chat_requests + chat_responses với 6 partition
+ENABLE_TEST_ENDPOINTS=true uvicorn app.main:app --reload
 ```
 
-Topic `chat_requests` cần được tạo trước với nhiều hơn 1 partition (ví dụ 6,
-xem `KAFKA_NUM_PARTITIONS`) — nếu chỉ có 1 partition thì không test được đúng
+`/test/enqueue` bypass quota nên mặc định TẮT — phải set `ENABLE_TEST_ENDPOINTS=true`
+mới dùng được cho các bài test dưới đây (endpoint thật cho FE là `POST /chat/ask`,
+xem `docs/phase2-quota-idempotency.md`).
+
+Topic `chat_requests` cần có nhiều hơn 1 partition (ví dụ 6, xem
+`KAFKA_NUM_PARTITIONS`; `scripts/create_topics.py` lo việc này) — nếu chỉ có 1 partition thì không test được đúng
 việc "khác user vẫn có thể chạy song song, cùng user luôn đúng thứ tự".
 
 ## Test thứ tự message trong cùng 1 user_id

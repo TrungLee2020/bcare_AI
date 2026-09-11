@@ -5,7 +5,9 @@ from aiokafka import AIOKafkaConsumer
 from pydantic import ValidationError
 
 from app.config import settings
+from app.redis_client import get_redis
 from app.schemas import ChatRequestMessage
+from app.services import idempotency
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +49,18 @@ async def _consume_loop() -> None:
 
             try:
                 message = ChatRequestMessage.model_validate_json(record.value)
+
+                # Kafka có thể giao lại message này nếu consumer crash trước
+                # khi commit offset. Guard ở đây để Phase 3 không gọi OpenAI
+                # 2 lần cho cùng 1 câu hỏi.
+                if not await idempotency.mark_processing(get_redis(), message.request_id):
+                    logger.info(
+                        "Bỏ qua request_id=%s (đã được xử lý trước đó)",
+                        message.request_id,
+                    )
+                    await consumer.commit()
+                    continue
+
                 logger.info(
                     "Consumed request_id=%s user_id=%s partition=%s offset=%s "
                     "key=%s content_len=%d",
@@ -57,8 +71,9 @@ async def _consume_loop() -> None:
                     record.key,
                     len(message.content),
                 )
-                # TODO Phase 2: check quota + idempotency trước khi xử lý tiếp
-                # TODO Phase 3: gọi OpenAI ở đây, publish kết quả sang chat_responses
+                # TODO Phase 3: gọi OpenAI ở đây, publish kết quả sang chat_responses.
+                # Nếu lỗi, gọi idempotency.unmark_processing() để message
+                # được xử lý lại ở lần retry sau.
             except ValidationError:
                 # Message sai schema không nên làm chết cả consumer loop.
                 # Ở Phase 5 sẽ đẩy các message lỗi này sang 1 dead-letter topic
