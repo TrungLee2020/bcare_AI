@@ -33,6 +33,7 @@ async def main() -> None:
             for name in (
                 settings.kafka_topic_chat_requests,
                 settings.kafka_topic_chat_responses,
+                settings.kafka_topic_dead_letter,
             )
             if name not in existing
         ]

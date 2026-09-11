@@ -3,7 +3,7 @@ import logging
 from aiokafka import AIOKafkaProducer
 
 from app.config import settings
-from app.schemas import ChatRequestMessage, ChatResponseMessage
+from app.schemas import ChatRequestMessage, ChatResponseMessage, DeadLetterMessage
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +71,30 @@ async def publish_chat_response(message: ChatResponseMessage) -> None:
         "Published response request_id=%s status=%s -> partition=%s offset=%s",
         message.request_id,
         message.status,
+        result.partition,
+        result.offset,
+    )
+
+
+async def publish_dead_letter(message: DeadLetterMessage) -> None:
+    """
+    Đẩy message không xử lý được sang dead-letter topic.
+
+    Có DLQ thì message hỏng vẫn được giữ lại để điều tra và replay sau, thay vì
+    bị log rồi trôi mất — và consumer không bị kẹt lặp vô hạn trên đúng 1
+    message hỏng.
+    """
+    if _producer is None:
+        raise RuntimeError("Producer chưa được start (gọi start_producer() trước)")
+
+    result = await _producer.send_and_wait(
+        settings.kafka_topic_dead_letter,
+        value=message.model_dump_json().encode("utf-8"),
+    )
+    logger.warning(
+        "Đẩy vào dead-letter reason=%s error=%s -> partition=%s offset=%s",
+        message.reason,
+        message.error_type,
         result.partition,
         result.offset,
     )

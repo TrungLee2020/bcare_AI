@@ -1,7 +1,9 @@
+import asyncio
 from uuid import uuid4
 
 import pytest
 
+from app.config import settings
 from app.kafka import consumer
 from app.redis_client import set_redis
 from app.schemas import ChatRequestMessage
@@ -17,6 +19,17 @@ def published(monkeypatch):
         sent.append(message)
 
     monkeypatch.setattr(consumer, "publish_chat_response", fake_publish)
+    return sent
+
+
+@pytest.fixture
+def dead_letters(monkeypatch):
+    sent = []
+
+    async def fake_publish(message):
+        sent.append(message)
+
+    monkeypatch.setattr(consumer, "publish_dead_letter", fake_publish)
     return sent
 
 
@@ -158,3 +171,74 @@ async def test_luot_loi_khong_duoc_ghi_vao_lich_su(redis, published, db_maker):
 
     assert published[0].status == "error"
     assert context.is_empty
+
+
+async def test_loi_het_retry_thi_day_sang_dead_letter(redis, published, dead_letters):
+    """Không có DLQ thì message hỏng chỉ còn lại một dòng log rồi trôi mất."""
+    set_redis(redis)
+    openai_client.set_openai(FakeOpenAI(error=RuntimeError("API down")))
+    message = request(user_id=21)
+    try:
+        await consumer._handle(message)
+    finally:
+        openai_client.set_openai(None)
+        set_redis(None)
+
+    assert len(dead_letters) == 1
+    dlq = dead_letters[0]
+    assert dlq.reason == "openai_failed"
+    assert dlq.error_type == "RuntimeError"
+    assert str(message.request_id) in dlq.payload
+    # vẫn phải có response error để SSE không treo
+    assert published[0].status == "error"
+
+
+async def test_tra_loi_thanh_cong_thi_khong_co_dead_letter(redis, published, dead_letters):
+    set_redis(redis)
+    openai_client.set_openai(FakeOpenAI())
+    try:
+        await consumer._handle(request())
+    finally:
+        openai_client.set_openai(None)
+        set_redis(None)
+
+    assert dead_letters == []
+
+
+async def test_khong_gui_thong_bao_dang_xu_ly_khi_tra_loi_kip_sla(
+    redis, published, monkeypatch
+):
+    monkeypatch.setattr(settings, "sse_processing_notice_seconds", 5.0)
+    set_redis(redis)
+    openai_client.set_openai(FakeOpenAI())
+    try:
+        await consumer._handle(request())
+    finally:
+        openai_client.set_openai(None)
+        set_redis(None)
+
+    assert [r.status for r in published] == ["ok"]
+
+
+async def test_tra_loi_cham_thi_gui_thong_bao_dang_xu_ly(redis, published, monkeypatch):
+    """Quá SLA mà im lặng thì client tưởng rớt kết nối."""
+    monkeypatch.setattr(settings, "sse_processing_notice_seconds", 0.05)
+    set_redis(redis)
+
+    slow = FakeOpenAI()
+    original = slow._create
+
+    async def slow_create(**kwargs):
+        await asyncio.sleep(0.3)
+        return await original(**kwargs)
+
+    slow.chat.completions.create = slow_create
+    openai_client.set_openai(slow)
+    try:
+        await consumer._handle(request())
+    finally:
+        openai_client.set_openai(None)
+        set_redis(None)
+
+    assert [r.status for r in published] == ["processing", "ok"]
+    assert published[0].detail == "slow"

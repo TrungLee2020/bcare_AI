@@ -89,8 +89,9 @@ class ChatResponseMessage(BaseModel):
     user_id: int
     session_id: UUID | None = None
     # ok = model trả lời bình thường | blocked = bị chặn ở lớp lọc input/output
-    # | error = gọi OpenAI lỗi, đã hết retry
-    status: Literal["ok", "blocked", "error"]
+    # | error = gọi OpenAI lỗi, đã hết retry | processing = chưa xong, chỉ là
+    # tín hiệu giữ nhịp cho SSE (không bao giờ là câu trả lời cuối cùng)
+    status: Literal["ok", "blocked", "error", "processing"]
     answer: ChatAnswer
     prompt_version: str
     model: str
@@ -108,3 +109,22 @@ class SessionSummary(BaseModel):
     # Các chủ đề sức khoẻ đã xuất hiện — để sau này dựng báo cáo/dashboard theo
     # thời gian mà không phải đọc lại toàn bộ lịch sử.
     health_topics: list[str]
+
+
+class DeadLetterMessage(BaseModel):
+    """
+    Message không xử lý được, đẩy sang `chat_requests_dlq`.
+
+    Giữ nguyên `payload` dạng chuỗi thô: message vào đây thường là vì KHÔNG
+    parse được, nên ép nó về schema lần nữa sẽ mất đúng phần cần điều tra.
+    """
+
+    reason: Literal["invalid_schema", "openai_failed"]
+    payload: str
+    error_type: str = ""
+    error_detail: str = ""
+    attempts: int = 0
+    topic: str = ""
+    partition: int | None = None
+    offset: int | None = None
+    failed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

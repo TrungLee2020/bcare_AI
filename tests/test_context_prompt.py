@@ -89,3 +89,14 @@ def test_env_example_tro_toi_prompt_co_that():
     example = Settings(_env_file=".env.example")
     load_prompt("system", example.prompt_version)
     load_prompt("summary", example.summary_prompt_version)
+
+
+def test_thong_bao_dang_xu_ly_phai_toi_truoc_khi_openai_timeout():
+    """Gửi 'đang xử lý' sau khi đã timeout thì vô nghĩa — client đã nhận lỗi
+    trước đó rồi."""
+    assert settings.sse_processing_notice_seconds < settings.openai_timeout_seconds
+
+    from app.config import Settings
+
+    example = Settings(_env_file=".env.example")
+    assert example.sse_processing_notice_seconds < example.openai_timeout_seconds

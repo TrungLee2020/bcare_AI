@@ -86,3 +86,12 @@ ERROR_ANSWER = ChatAnswer(
     should_see_doctor=False,
     follow_up_questions=[],
 )
+
+
+PROCESSING_ANSWER = ChatAnswer(
+    answer="Mình đang tìm câu trả lời cho bạn, chờ một chút nhé...",
+    out_of_scope=False,
+    refusal_reason="",
+    should_see_doctor=False,
+    follow_up_questions=[],
+)

@@ -6,6 +6,7 @@ from app.config import settings
 from app.db.repository import ConversationContext
 from app.prompts import load_prompt, load_system_prompt
 from app.schemas import ChatAnswer, SessionSummary
+from app.services.retry import call_with_backoff
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,15 @@ def set_openai(client) -> None:
     """Dùng cho test: inject client giả, không gọi API thật."""
     global _client
     _client = client
+
+
+async def _with_retry(factory):
+    return await call_with_backoff(
+        factory,
+        attempts=settings.openai_max_attempts,
+        base_delay=settings.openai_retry_base_delay,
+        max_delay=settings.openai_retry_max_delay,
+    )
 
 
 def _response_format(name: str = "chat_answer", model=None) -> dict:
@@ -103,12 +113,14 @@ async def generate(
     """Gọi OpenAI và parse ra ChatAnswer. Lỗi mạng/API được ném lên cho caller
     xử lý (retry + dead-letter là việc của Phase 5)."""
     version = prompt_version or settings.prompt_version
-    completion = await get_openai().chat.completions.create(
-        model=settings.openai_model,
-        messages=build_messages(content, version, context),
-        response_format=_response_format(),
-        temperature=settings.openai_temperature,
-        max_tokens=settings.openai_max_output_tokens,
+    completion = await _with_retry(
+        lambda: get_openai().chat.completions.create(
+            model=settings.openai_model,
+            messages=build_messages(content, version, context),
+            response_format=_response_format(),
+            temperature=settings.openai_temperature,
+            max_tokens=settings.openai_max_output_tokens,
+        )
     )
     raw = completion.choices[0].message.content or ""
     return ChatAnswer.model_validate_json(raw)
@@ -118,14 +130,16 @@ async def summarize(transcript: str, prompt_version: str | None = None) -> Sessi
     """Nén các lượt cũ thành summary. Dùng prompt riêng (prompts/summary_*.md),
     không dùng chung system prompt trả lời."""
     version = prompt_version or settings.summary_prompt_version
-    completion = await get_openai().chat.completions.create(
-        model=settings.openai_model,
-        messages=[
-            {"role": "system", "content": load_prompt("summary", version)},
-            {"role": "user", "content": f"<transcript>\n{transcript}\n</transcript>"},
-        ],
-        response_format=_response_format("session_summary", SessionSummary),
-        temperature=settings.openai_temperature,
-        max_tokens=settings.openai_max_output_tokens,
+    completion = await _with_retry(
+        lambda: get_openai().chat.completions.create(
+            model=settings.openai_model,
+            messages=[
+                {"role": "system", "content": load_prompt("summary", version)},
+                {"role": "user", "content": f"<transcript>\n{transcript}\n</transcript>"},
+            ],
+            response_format=_response_format("session_summary", SessionSummary),
+            temperature=settings.openai_temperature,
+            max_tokens=settings.openai_max_output_tokens,
+        )
     )
     return SessionSummary.model_validate_json(completion.choices[0].message.content or "")

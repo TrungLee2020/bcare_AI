@@ -64,6 +64,24 @@ class Settings(BaseSettings):
     summary_prompt_version: str = "v1"
     summary_max_chars: int = 1500
 
+    # Retry khi gọi OpenAI lỗi tạm thời (rate limit, timeout, 5xx)
+    openai_max_attempts: int = 3
+    openai_retry_base_delay: float = 1.0
+    openai_retry_max_delay: float = 8.0
+    # Message hỏng hoặc lỗi hết retry được đẩy sang đây thay vì bị bỏ im lặng
+    kafka_topic_dead_letter: str = "chat_requests_dlq"
+
+    # SSE
+    # Nhịp heartbeat: proxy/load balancer thường đóng kết nối idle sau 30-60s,
+    # gửi comment rỗng định kỳ để giữ kết nối sống.
+    sse_heartbeat_seconds: float = 15.0
+    # Quá mốc này mà chưa trả lời xong thì đẩy 1 event "đang xử lý" để client
+    # không tưởng mất kết nối. Phải NHỎ HƠN openai_timeout_seconds.
+    sse_processing_notice_seconds: float = 5.0
+    # Số response gần nhất giữ lại cho mỗi user để replay khi client reconnect
+    sse_replay_buffer_size: int = 20
+    sse_replay_ttl_seconds: int = 3600
+
     # Bật /test/enqueue (bypass quota, chỉ để verify pipeline Phase 1).
     # Mặc định TẮT — endpoint này bỏ qua quota nên không được bật ở production.
     enable_test_endpoints: bool = False

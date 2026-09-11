@@ -5,9 +5,9 @@ from aiokafka import AIOKafkaConsumer
 from pydantic import ValidationError
 
 from app.config import settings
-from app.kafka.producer import publish_chat_response
+from app.kafka.producer import publish_chat_response, publish_dead_letter
 from app.redis_client import get_redis
-from app.schemas import ChatRequestMessage, ChatResponseMessage
+from app.schemas import ChatRequestMessage, ChatResponseMessage, DeadLetterMessage
 from app.services import answering, history, idempotency, quota
 
 logger = logging.getLogger(__name__)
@@ -16,29 +16,65 @@ _consumer_task: asyncio.Task | None = None
 _stop_event = asyncio.Event()
 
 
+def _notice(message: ChatRequestMessage, status: str, answer, detail: str = "") -> ChatResponseMessage:
+    return ChatResponseMessage(
+        request_id=message.request_id,
+        user_id=message.user_id,
+        session_id=message.session_id,
+        status=status,
+        answer=answer,
+        prompt_version=settings.prompt_version,
+        model=settings.openai_model,
+        detail=detail,
+    )
+
+
+async def _notify_slow(message: ChatRequestMessage) -> None:
+    """
+    Quá SLA mà chưa xong thì đẩy 1 event "đang xử lý" để client biết hệ thống
+    vẫn đang chạy chứ không phải rớt kết nối.
+
+    Gửi qua đúng topic chat_responses như mọi response khác, vì kết nối SSE của
+    user có thể đang nằm ở instance khác — instance này không tự đẩy thẳng vào
+    hub của nó được.
+    """
+    try:
+        await asyncio.sleep(settings.sse_processing_notice_seconds)
+        await publish_chat_response(
+            _notice(message, "processing", answering.PROCESSING_ANSWER, "slow")
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        # Đây chỉ là tín hiệu giữ nhịp; hỏng thì thôi, không được làm hỏng
+        # luồng trả lời chính.
+        logger.exception("Không gửi được thông báo đang xử lý cho %s", message.request_id)
+
+
 async def _handle(message: ChatRequestMessage) -> None:
     """Xử lý 1 câu hỏi: sinh câu trả lời, cache lại cho retry, publish sang
     chat_responses."""
     redis = get_redis()
+    slow_notice = asyncio.create_task(_notify_slow(message))
     try:
         context = await history.load_context(message)
         response = await answering.answer_question(message, context)
     except Exception as exc:
-        # Phase 5 sẽ thêm retry + backoff + dead-letter trước khi tới nước này.
-        # Hiện tại: hoàn quota (user chưa nhận được câu trả lời nào) và vẫn
-        # publish 1 response status=error để SSE không treo chờ vô hạn.
+        # Tới đây là đã retry hết số lần cho phép (xem app/services/retry.py).
+        # Hoàn quota (user chưa nhận được câu trả lời nào), đẩy message sang
+        # dead-letter để còn điều tra/replay, và vẫn publish 1 response
+        # status=error để SSE không treo chờ vô hạn.
         logger.exception("Sinh câu trả lời thất bại request_id=%s", message.request_id)
         await quota.refund(redis, message.user_id)
-        response = ChatResponseMessage(
-            request_id=message.request_id,
-            user_id=message.user_id,
-            session_id=message.session_id,
-            status="error",
-            answer=answering.ERROR_ANSWER,
-            prompt_version=settings.prompt_version,
-            model=settings.openai_model,
-            detail=type(exc).__name__,
+        await _to_dead_letter(
+            reason="openai_failed",
+            payload=message.model_dump_json(),
+            exc=exc,
+            attempts=settings.openai_max_attempts,
         )
+        response = _notice(message, "error", answering.ERROR_ANSWER, type(exc).__name__)
+    finally:
+        slow_notice.cancel()
 
     # Cache trước khi publish: nếu publish lỗi thì client retry cùng request_id
     # vẫn lấy được câu trả lời qua API thay vì mất trắng.
@@ -63,6 +99,22 @@ async def _handle(message: ChatRequestMessage) -> None:
             logger.exception(
                 "Ghi lịch sử thất bại request_id=%s", message.request_id
             )
+
+
+async def _to_dead_letter(*, reason: str, payload: str, exc: BaseException | None = None, **extra) -> None:
+    """Đẩy sang DLQ. Bản thân bước này hỏng cũng không được làm chết consumer."""
+    try:
+        await publish_dead_letter(
+            DeadLetterMessage(
+                reason=reason,
+                payload=payload,
+                error_type=type(exc).__name__ if exc else "",
+                error_detail=str(exc)[:500] if exc else "",
+                **extra,
+            )
+        )
+    except Exception:
+        logger.exception("Không đẩy được message sang dead-letter (reason=%s)", reason)
 
 
 async def _consume_loop() -> None:
@@ -122,14 +174,22 @@ async def _consume_loop() -> None:
                     len(message.content),
                 )
                 await _handle(message)
-            except ValidationError:
-                # Message sai schema không nên làm chết cả consumer loop.
-                # Ở Phase 5 sẽ đẩy các message lỗi này sang 1 dead-letter topic
-                # thay vì chỉ log rồi bỏ qua như hiện tại.
+            except ValidationError as exc:
+                # Message sai schema không bao giờ đúng ở lần thử sau, nên retry
+                # là vô nghĩa. Đẩy sang dead-letter để giữ lại mà điều tra rồi
+                # đi tiếp, thay vì kẹt mãi ở đúng 1 message hỏng.
                 logger.exception(
-                    "Message tại partition=%s offset=%s không đúng schema, bỏ qua",
+                    "Message tại partition=%s offset=%s không đúng schema",
                     record.partition,
                     record.offset,
+                )
+                await _to_dead_letter(
+                    reason="invalid_schema",
+                    payload=record.value.decode("utf-8", errors="replace"),
+                    exc=exc,
+                    topic=record.topic,
+                    partition=record.partition,
+                    offset=record.offset,
                 )
 
             # "Ack" = commit offset. Làm sau khi xử lý (kể cả khi lỗi schema ở trên)

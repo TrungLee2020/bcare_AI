@@ -4,9 +4,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.chat import router as chat_router
+from app.sse.stream import router as sse_router
 from app.config import settings
 from app.db.session import start_db, stop_db
 from app.kafka.consumer import start_consumer, stop_consumer
+from app.kafka.response_consumer import start_response_consumer, stop_response_consumer
 from app.kafka.producer import publish_chat_request, start_producer, stop_producer
 from app.redis_client import start_redis, stop_redis
 from app.services.openai_client import start_openai, stop_openai
@@ -25,7 +27,9 @@ async def lifespan(app: FastAPI):
     start_openai()
     await start_producer()
     start_consumer()
+    start_response_consumer()
     yield
+    await stop_response_consumer()
     await stop_consumer()
     await stop_producer()
     await stop_openai()
@@ -35,6 +39,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="bcare_AI - AI answering service", lifespan=lifespan)
 app.include_router(chat_router)
+app.include_router(sse_router)
 
 
 @app.get("/health")
