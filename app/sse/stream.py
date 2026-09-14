@@ -1,11 +1,12 @@
 """
 Endpoint SSE: `GET /chat/stream`.
 
-**Chưa có xác thực.** `user_id` lấy thẳng từ query param, nghĩa là bất kỳ ai
-cũng có thể nghe câu trả lời của người khác nếu đoán được user_id. Service này
-được thiết kế để chạy SAU gateway/BE hiện có (nơi đã xác thực người dùng) và
-KHÔNG được expose thẳng ra internet. Trước khi rollout phải thay `user_id` bằng
-danh tính lấy từ token — xem docs/phase5-sse-resilience.md.
+`user_id` lấy từ token đã ký, không phải từ query param (trước Phase 6 thì có,
+và ai cũng nghe được câu trả lời sức khoẻ của người khác nếu đoán được user_id).
+
+Token phải đi qua **query param** `?token=...` chứ không phải header
+Authorization: EventSource của trình duyệt không gửi được header tuỳ ý. Đánh
+đổi: token nằm trong access log của proxy, nên loại token này cần TTL ngắn.
 """
 
 import asyncio
@@ -13,8 +14,11 @@ import json
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
+
+from app import metrics
+from app.auth import Principal, current_principal
 
 from app.config import settings
 from app.redis_client import get_redis
@@ -60,14 +64,15 @@ async def event_stream(request: Request, user_id: int, last_request_id: UUID | N
 @router.get("/stream")
 async def stream(
     request: Request,
-    user_id: int = Query(..., description="Tạm thời chưa xác thực - xem docstring"),
     last_request_id: UUID | None = Query(
         None,
         description="request_id cuối cùng client đã nhận; dùng để phát lại phần đã lỡ",
     ),
+    principal: Principal = Depends(current_principal),
 ) -> StreamingResponse:
+    metrics.incr("sse_connections")
     return StreamingResponse(
-        event_stream(request, user_id, last_request_id),
+        event_stream(request, principal.user_id, last_request_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

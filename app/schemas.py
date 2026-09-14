@@ -26,6 +26,10 @@ class ChatAskRequest(BaseModel):
     """
     Body của endpoint chính `POST /chat/ask`.
 
+    KHÔNG có `user_id` và `tier`: hai trường đó đến từ token đã ký (app/auth.py).
+    Trước Phase 6 chúng nằm trong body, nghĩa là client chỉ cần gửi
+    `tier: "premium"` là được 5 câu/ngày thay vì 2.
+
     `request_id` nên do CLIENT sinh và giữ nguyên khi retry — đó là thứ duy
     nhất giúp server phân biệt "user hỏi câu mới giống hệt" với "vẫn câu cũ,
     mạng lỗi nên gửi lại". Nếu client không gửi, server tự sinh và mỗi lần
@@ -33,17 +37,15 @@ class ChatAskRequest(BaseModel):
     """
 
     request_id: UUID = Field(default_factory=uuid4)
-    user_id: int
     session_id: UUID | None = None
-    tier: Literal["free", "premium"]
     content: str = Field(min_length=1, max_length=2000)
 
-    def to_message(self) -> "ChatRequestMessage":
+    def to_message(self, user_id: int, tier: str) -> "ChatRequestMessage":
         return ChatRequestMessage(
             request_id=self.request_id,
-            user_id=self.user_id,
+            user_id=user_id,
             session_id=self.session_id,
-            tier=self.tier,
+            tier=tier,
             content=self.content,
         )
 
@@ -97,6 +99,8 @@ class ChatResponseMessage(BaseModel):
     model: str
     # Lý do kỹ thuật khi bị chặn/lỗi — để log và dashboard, KHÔNG hiển thị cho user
     detail: str = ""
+    # Token đã dùng + chi phí ước tính của lượt này (rỗng nếu không gọi API)
+    usage: dict = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 

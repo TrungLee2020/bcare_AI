@@ -50,5 +50,6 @@ class FakeOpenAI:
         result = self.summary if name == "session_summary" else self.answer
         payload = json.dumps(result.model_dump(), ensure_ascii=False)
         return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=payload))]
+            choices=[SimpleNamespace(message=SimpleNamespace(content=payload))],
+            usage=SimpleNamespace(prompt_tokens=800, completion_tokens=200),
         )

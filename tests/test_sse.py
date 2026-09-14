@@ -225,7 +225,11 @@ async def test_dong_ket_noi_thi_don_sach_subscriber(redis):
 async def test_response_co_header_chong_buffer_cua_nginx():
     """Thiếu X-Accel-Buffering, nginx sẽ gom event lại rồi mới đẩy một lượt và
     SSE mất hết tính realtime."""
-    result = await stream(StubRequest(0), user_id=1, last_request_id=None)
+    from app.auth import Principal
+
+    result = await stream(
+        StubRequest(0), last_request_id=None, principal=Principal(user_id=1, tier="free")
+    )
     assert result.media_type == "text/event-stream"
     assert result.headers["x-accel-buffering"] == "no"
     assert result.headers["cache-control"] == "no-cache"

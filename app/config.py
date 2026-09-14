@@ -82,6 +82,24 @@ class Settings(BaseSettings):
     sse_replay_buffer_size: int = 20
     sse_replay_ttl_seconds: int = 3600
 
+    # Xác thực (Phase 6). Mặc định BẬT: user_id/tier lấy từ token đã ký, không
+    # phải từ body do client gửi.
+    auth_required: bool = True
+    auth_secret: str = ""
+
+    # Rollout dần
+    rollout_enabled: bool = True
+    # % user được bật, chia theo hash của user_id. 0 = chỉ allowlist.
+    rollout_percentage: int = 0
+    # Danh sách user_id luôn được bật, cách nhau bằng dấu phẩy (nhóm nội bộ)
+    rollout_allowlist: str = ""
+
+    # Giá OpenAI (USD / 1 triệu token) để ước tính chi phí.
+    # !! Phải đối chiếu lại với bảng giá hiện hành của OpenAI trước khi tin số
+    # liệu báo cáo — giá thay đổi theo thời gian và theo model.
+    price_input_per_1m: float = 0.15
+    price_output_per_1m: float = 0.60
+
     # Bật /test/enqueue (bypass quota, chỉ để verify pipeline Phase 1).
     # Mặc định TẮT — endpoint này bỏ qua quota nên không được bật ở production.
     enable_test_endpoints: bool = False

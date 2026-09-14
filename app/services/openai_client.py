@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 
 from openai import AsyncOpenAI
 
@@ -6,9 +7,18 @@ from app.config import settings
 from app.db.repository import ConversationContext
 from app.prompts import load_prompt, load_system_prompt
 from app.schemas import ChatAnswer, SessionSummary
+from app.services.cost import Usage, from_completion
 from app.services.retry import call_with_backoff
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class Generation:
+    """Câu trả lời kèm token đã dùng — usage là đầu vào để đo chi phí thật."""
+
+    answer: ChatAnswer
+    usage: Usage
 
 _client: AsyncOpenAI | None = None
 
@@ -109,9 +119,9 @@ async def generate(
     content: str,
     prompt_version: str | None = None,
     context: ConversationContext | None = None,
-) -> ChatAnswer:
-    """Gọi OpenAI và parse ra ChatAnswer. Lỗi mạng/API được ném lên cho caller
-    xử lý (retry + dead-letter là việc của Phase 5)."""
+) -> Generation:
+    """Gọi OpenAI và parse ra ChatAnswer kèm token usage. Lỗi mạng/API được ném
+    lên cho caller xử lý (retry ở tầng dưới, dead-letter ở consumer)."""
     version = prompt_version or settings.prompt_version
     completion = await _with_retry(
         lambda: get_openai().chat.completions.create(
@@ -123,7 +133,9 @@ async def generate(
         )
     )
     raw = completion.choices[0].message.content or ""
-    return ChatAnswer.model_validate_json(raw)
+    return Generation(
+        answer=ChatAnswer.model_validate_json(raw), usage=from_completion(completion)
+    )
 
 
 async def summarize(transcript: str, prompt_version: str | None = None) -> SessionSummary:

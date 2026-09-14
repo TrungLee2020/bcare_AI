@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app import metrics
 from app.api.chat import router as chat_router
 from app.sse.stream import router as sse_router
 from app.config import settings
@@ -14,14 +15,32 @@ from app.redis_client import start_redis, stop_redis
 from app.services.openai_client import start_openai, stop_openai
 from app.schemas import ChatRequestMessage
 
+logger = logging.getLogger(__name__)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 
 
+def _check_auth_config() -> None:
+    """Fail-closed: bật auth mà quên đặt secret thì phải chết ngay lúc khởi
+    động, chứ không phải chạy ngon lành rồi chấp nhận mọi token."""
+    if settings.auth_required and not settings.auth_secret:
+        raise RuntimeError(
+            "AUTH_SECRET trống trong khi AUTH_REQUIRED=true. "
+            "Đặt AUTH_SECRET, hoặc AUTH_REQUIRED=false nếu đang chạy local."
+        )
+    if not settings.auth_required:
+        logger.warning(
+            "AUTH_REQUIRED=false: user_id/tier lấy từ query param, KHÔNG xác "
+            "thực. Chỉ được dùng ở local."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _check_auth_config()
     await start_redis()
     await start_db()
     start_openai()
@@ -45,6 +64,13 @@ app.include_router(sse_router)
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/metrics")
+async def read_metrics() -> dict:
+    """Số liệu của RIÊNG instance này, reset khi restart. Đủ để theo dõi giai
+    đoạn rollout; mở rộng thì thay bằng Prometheus exporter."""
+    return metrics.snapshot()
 
 
 if settings.enable_test_endpoints:

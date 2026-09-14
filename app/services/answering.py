@@ -9,6 +9,7 @@ import logging
 from app.config import settings
 from app.db.repository import ConversationContext
 from app.schemas import ChatAnswer, ChatRequestMessage, ChatResponseMessage
+from app import metrics
 from app.services import input_filter, openai_client, output_validator
 
 logger = logging.getLogger(__name__)
@@ -35,7 +36,10 @@ async def answer_question(
     """
     version = settings.prompt_version
 
-    def _response(answer: ChatAnswer, status: str, detail: str = "") -> ChatResponseMessage:
+    def _response(
+        answer: ChatAnswer, status: str, detail: str = "", usage: dict | None = None
+    ) -> ChatResponseMessage:
+        metrics.incr(f"answers_{status}")
         return ChatResponseMessage(
             request_id=message.request_id,
             user_id=message.user_id,
@@ -45,6 +49,7 @@ async def answer_question(
             prompt_version=version,
             model=settings.openai_model,
             detail=detail,
+            usage=usage or {},
         )
 
     verdict = input_filter.check(message.content)
@@ -60,20 +65,26 @@ async def answer_question(
             verdict.reasons,
             verdict.matches,
         )
+        metrics.incr("input_blocked")
         return _response(BLOCKED_ANSWER, "blocked", ",".join(verdict.reasons))
 
-    raw_answer = await openai_client.generate(message.content, version, context)
+    generation = await openai_client.generate(message.content, version, context)
+    usage = generation.usage.as_dict()
+    metrics.incr("openai_calls")
+    metrics.incr("tokens_total", generation.usage.total_tokens)
+    metrics.incr("cost_usd", usage["cost_usd"])
 
-    outcome = output_validator.validate(raw_answer, version)
+    outcome = output_validator.validate(generation.answer, version)
     if not outcome.ok:
         logger.warning(
             "Câu trả lời không qua validate request_id=%s reasons=%s",
             message.request_id,
             outcome.reasons,
         )
-        return _response(outcome.answer, "blocked", outcome.detail)
+        metrics.incr("output_blocked")
+        return _response(outcome.answer, "blocked", outcome.detail, usage)
 
-    return _response(outcome.answer, "ok")
+    return _response(outcome.answer, "ok", usage=usage)
 
 
 ERROR_ANSWER = ChatAnswer(

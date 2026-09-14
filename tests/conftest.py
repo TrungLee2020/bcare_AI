@@ -12,32 +12,58 @@ async def redis():
 
 @pytest.fixture(autouse=True)
 def _reset_settings():
-    """Giữ quota mặc định (free=2, premium=5) ổn định giữa các test."""
+    """Giữ config ổn định giữa các test, và đặt sẵn secret + mở rollout 100%
+    để test không phải lo hai thứ đó ở mọi chỗ."""
+    from app import metrics
     from app.config import settings
 
-    before = (settings.quota_free_per_day, settings.quota_premium_per_day)
+    keys = (
+        "quota_free_per_day", "quota_premium_per_day", "auth_secret",
+        "auth_required", "rollout_enabled", "rollout_percentage",
+        "rollout_allowlist",
+    )
+    before = {k: getattr(settings, k) for k in keys}
+    settings.auth_secret = "test-secret"
+    settings.auth_required = True
+    settings.rollout_enabled = True
+    settings.rollout_percentage = 100
+    settings.rollout_allowlist = ""
+    metrics.reset()
     yield
-    settings.quota_free_per_day, settings.quota_premium_per_day = before
+    for k, v in before.items():
+        setattr(settings, k, v)
 
 
 @pytest_asyncio.fixture
 async def db_maker():
     """
-    SQLite in-memory qua aiosqlite: test chạy trên SQL thật (transaction, khoá
-    ngoại, unique index đều có hiệu lực) mà không cần dựng Postgres trong CI.
+    Mặc định: SQLite in-memory qua aiosqlite — test chạy trên SQL thật
+    (transaction, khoá ngoại, unique index đều có hiệu lực) mà CI không cần
+    dựng Postgres.
 
-    Khác biệt so với Postgres cần biết: JSONB -> JSON thường, BIGSERIAL ->
-    INTEGER autoincrement. Các truy vấn ở repository đều là SQL chuẩn nên hành
-    vi giống nhau, nhưng migration thật vẫn phải kiểm trên Postgres.
+    Đặt `TEST_DATABASE_URL` để chạy đúng bộ test đó trên Postgres thật:
+
+        TEST_DATABASE_URL=postgresql+asyncpg://bcare@/bcare?host=/tmp pytest
+
+    Cần chạy trên Postgres trước khi rollout, vì SQLite khác Postgres ở đúng
+    những chỗ schema đang dùng: JSONB -> JSON, BIGSERIAL -> INTEGER.
     """
+    import os
+
+    import sqlalchemy
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     from app.db.models import Base
     from app.db.session import set_sessionmaker
 
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    url = os.getenv("TEST_DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+    engine = create_async_engine(url)
     async with engine.begin() as conn:
-        await conn.execute(__import__("sqlalchemy").text("PRAGMA foreign_keys=ON"))
+        if engine.dialect.name == "sqlite":
+            await conn.execute(sqlalchemy.text("PRAGMA foreign_keys=ON"))
+        else:
+            # Postgres: dọn sạch giữa các test vì DB không phải in-memory
+            await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
 
     maker = async_sessionmaker(engine, expire_on_commit=False)
