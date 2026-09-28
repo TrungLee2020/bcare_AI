@@ -98,3 +98,43 @@ def test_cau_tra_loi_bao_hiem_binh_thuong_khong_bi_bat_nham_co_cap_cuu():
     outcome = output_validator.validate(answer)
     assert outcome.ok
     assert outcome.answer.should_see_doctor is False
+
+
+def test_bi_chan_ma_co_dau_hieu_cap_cuu_thi_van_khuyen_di_cap_cuu():
+    """Model nói "gọi 115 ngay" nhưng lỡ kèm một liều thuốc -> bị chặn vì liều
+    thuốc. Người đang đau ngực không được nhận về "bạn thử hỏi lại rõ hơn"."""
+    answer = ChatAnswer(
+        answer="Đau ngực dữ dội kèm khó thở là dấu hiệu nguy hiểm. Có thể nhai "
+        "1 viên aspirin 300 mg rồi gọi 115 ngay.",
+        out_of_scope=False, refusal_reason="", should_see_doctor=True,
+        follow_up_questions=[],
+    )
+    outcome = output_validator.validate(answer, question="Tôi bị đau ngực")
+    assert not outcome.ok
+    assert outcome.answer is output_validator.EMERGENCY_FALLBACK_ANSWER
+    assert outcome.answer.should_see_doctor
+
+
+def test_bi_chan_theo_cau_hoi_co_dau_hieu_cap_cuu():
+    answer = ChatAnswer(
+        answer="Bạn uống 500mg paracetamol.", out_of_scope=False,
+        refusal_reason="", should_see_doctor=False, follow_up_questions=[],
+    )
+    outcome = output_validator.validate(answer, question="Bố tôi khó thở, môi tím tái")
+    assert outcome.answer.should_see_doctor
+
+
+def test_bi_chan_khong_co_dau_hieu_cap_cuu_thi_dung_fallback_thuong():
+    answer = ChatAnswer(
+        answer="Bạn uống 500mg paracetamol.", out_of_scope=False,
+        refusal_reason="", should_see_doctor=False, follow_up_questions=[],
+    )
+    outcome = output_validator.validate(answer, question="Tôi bị đau đầu nhẹ")
+    assert outcome.answer is output_validator.FALLBACK_ANSWER
+
+
+def test_ten_benh_trong_cau_hoi_bao_hiem_khong_bi_coi_la_cap_cuu():
+    """"Đột quỵ" là quyền lợi bệnh hiểm nghèo trong bảo hiểm; chỉ TRIỆU CHỨNG
+    (méo miệng, yếu nửa người) mới là dấu hiệu cấp cứu."""
+    assert not output_validator.mentions_emergency("Gói này có chi trả đột quỵ không?")
+    assert output_validator.mentions_emergency("Bố tôi đột nhiên méo miệng, yếu nửa người")

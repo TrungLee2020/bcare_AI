@@ -31,9 +31,9 @@ uvicorn app.main:app --reload
 ## Test
 
 ```bash
-pytest -q                                            # 164 test, không cần hạ tầng
+pytest -q                                            # 212 test, không cần hạ tầng
 TEST_DATABASE_URL=postgresql+asyncpg://... pytest -q  # cùng bộ đó trên Postgres thật
-OPENAI_API_KEY=sk-... pytest -m live -q              # 12 test gọi OpenAI thật
+OPENAI_API_KEY=sk-... pytest -m live -q              # 22 test gọi OpenAI thật
 python -m scripts.loadtest --users 50 --questions 3  # cần Kafka/Redis/app đang chạy
 ```
 
@@ -48,9 +48,10 @@ python -m scripts.loadtest --users 50 --questions 3  # cần Kafka/Redis/app đa
 | 5 | SSE, retry/backoff, dead-letter | [phase5](docs/phase5-sse-resilience.md) |
 | 6 | Xác thực, rollout dần, đo chi phí | [phase6](docs/phase6-test-rollout.md) |
 | 7 | Rà lại logic prompt (ranh giới dữ liệu, cắt cụt, trần chi phí) | [phase7](docs/phase7-prompt-hardening.md) |
+| 8 | Rà soát trước production: consumer, SSE, chặn nhầm, an toàn y tế, prompt v4 | [phase8](docs/phase8-production-review.md) |
 
 ## Trước khi lên production
 
-Xem mục "Còn nợ" ở [phase6](docs/phase6-test-rollout.md). Tóm tắt những thứ
+Xem [phase8](docs/phase8-production-review.md) (mục "Chưa sửa" và "Bắt buộc trước khi rollout") và mục "Còn nợ" ở [phase6](docs/phase6-test-rollout.md). Tóm tắt những thứ
 **chưa từng chạy lần nào**: load test với Kafka thật, test injection với model
 thật (`pytest -m live`), fanout SSE nhiều instance, và kiểm qua nginx/LB thật.

@@ -1,13 +1,14 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response, status
 
 from app import metrics
 from app.api.chat import router as chat_router
 from app.sse.stream import router as sse_router
 from app.config import settings
 from app.db.session import start_db, stop_db
+from app.kafka import consumer, response_consumer
 from app.kafka.consumer import start_consumer, stop_consumer
 from app.kafka.response_consumer import start_response_consumer, stop_response_consumer
 from app.kafka.producer import publish_chat_request, start_producer, stop_producer
@@ -62,8 +63,20 @@ app.include_router(sse_router)
 
 
 @app.get("/health")
-async def health() -> dict:
-    return {"status": "ok"}
+async def health(response: Response) -> dict:
+    """
+    Dùng làm liveness probe. Trả 503 khi một trong hai vòng consumer đã chết:
+    process vẫn nhận HTTP bình thường nhưng không còn trả lời câu hỏi (hoặc
+    không còn đẩy được xuống SSE) — để k8s khởi động lại thay vì đứng im.
+    """
+    checks = {
+        "request_consumer": consumer.is_alive(),
+        "response_consumer": response_consumer.is_alive(),
+    }
+    ok = all(checks.values())
+    if not ok:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    return {"status": "ok" if ok else "degraded", **checks}
 
 
 @app.get("/metrics")

@@ -51,7 +51,7 @@ class Settings(BaseSettings):
 
     # Prompt version đang chạy (file prompts/system_<version>.md).
     # Đổi prompt = đổi biến này, không cần sửa code.
-    prompt_version: str = "v3"
+    prompt_version: str = "v4"
     # Chặn câu trả lời dài bất thường (dấu hiệu model lan man hoặc bị dẫn dắt)
     answer_max_chars: int = 2000
 

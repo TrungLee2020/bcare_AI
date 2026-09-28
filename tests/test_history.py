@@ -86,3 +86,27 @@ async def test_hai_phien_khong_lan_ngu_canh_vao_nhau(db_maker):
     await history.record_turn(msg_a, response(msg_a))
 
     assert (await history.load_context(request(b))).is_empty
+
+
+async def test_khong_doc_duoc_phien_cua_user_khac(db_maker):
+    """session_id do client gửi lên: không lọc theo chủ phiên thì ai có
+    session_id của người khác cũng đọc được lịch sử sức khoẻ của họ."""
+    sid = uuid4()
+    owner = request(sid, "tôi bị trầm cảm", user_id=1)
+    await history.record_turn(owner, response(owner))
+
+    assert (await history.load_context(request(sid, user_id=2))).is_empty
+    assert not (await history.load_context(request(sid, user_id=1))).is_empty
+
+
+async def test_khong_ghi_duoc_vao_phien_cua_user_khac(db_maker):
+    """Ghi được là chèn được nội dung (kể cả câu injection) vào ngữ cảnh của
+    người khác."""
+    sid = uuid4()
+    owner = request(sid, "câu của chủ phiên", user_id=1)
+    await history.record_turn(owner, response(owner))
+    intruder = request(sid, "câu của người lạ", user_id=2)
+    await history.record_turn(intruder, response(intruder))
+
+    ctx = await history.load_context(request(sid, user_id=1))
+    assert "câu của người lạ" not in [m.content for m in ctx.recent]
