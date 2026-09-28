@@ -190,11 +190,11 @@ async def summarize(transcript: str, prompt_version: str | None = None) -> Sessi
                 {"role": "system", "content": load_prompt("summary", version)},
                 {
                     "role": "user",
-                    "content": fence(
-                        "transcript",
-                        transcript,
-                        settings.summary_transcript_max_chars,
-                    ),
+                    # `transcript` do `summarizer.render_transcript` dựng từ các
+                    # khối fence() đã gỡ thẻ và đã chặn độ dài theo từng khối.
+                    # Gỡ thẻ lần nữa ở đây là xoá mất <user>/<assistant>, model
+                    # tóm tắt không còn biết câu nào của ai.
+                    "content": fence("transcript", transcript, sanitize=False),
                 },
             ],
             response_format=_response_format("session_summary", SessionSummary),
