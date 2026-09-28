@@ -73,8 +73,13 @@ class Settings(BaseSettings):
     summary_transcript_max_chars: int = 8000
     # Tóm tắt khi số message chưa tóm tắt vượt ngưỡng này
     summary_trigger_messages: int = 20
-    summary_prompt_version: str = "v2"
+    summary_prompt_version: str = "v3"
     summary_max_chars: int = 1500
+    # Tóm tắt thất bại (lỗi API, bị cắt cụt, summary không qua kiểm tra an
+    # toàn) thì chờ thêm ngần này message mới thử lại. Không có khoảng chờ thì
+    # một phiên có summary luôn bị từ chối (vd người dùng từng thử injection và
+    # model cứ chép lại) sẽ tốn thêm một lần gọi tóm tắt ở MỌI lượt hỏi sau.
+    summary_retry_after_messages: int = 6
 
     # Retry khi gọi OpenAI lỗi tạm thời (rate limit, timeout, 5xx)
     openai_max_attempts: int = 3

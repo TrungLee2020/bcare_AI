@@ -112,9 +112,32 @@ giá gpt-4o-mini hiện đặt trong config). Đã cắt gọn lại một lư�
 prompt dài không chỉ tốn tiền mà còn làm model bám hướng dẫn kém đi, nên phần
 thêm vào chỉ giữ những gì đóng đúng một lỗ cụ thể ở trên.
 
+## 8. Sửa tiếp sau khi merge
+
+Rà lại luồng tóm tắt sau khi Phase 7 vào `main`, thấy 4 lỗi:
+
+- **Transcript mất thẻ `<user>`/`<assistant>`.** `render_transcript` dựng các
+  khối qua `fence()`, rồi `summarize()` bọc thêm `fence("transcript", ...)` — lần
+  bọc này gỡ thẻ lượt nữa, xoá luôn chính các thẻ vừa dựng. Model tóm tắt không
+  còn biết câu nào của ai. `fence()` có thêm `sanitize=False`, chỉ dùng cho nội
+  dung ghép từ các khối `fence()` khác.
+- **Transcript quá dài thì phần bị cắt biến mất.** Mốc `summarized_through_id`
+  lấy theo cả nhóm message, kể cả phần bị cắt khỏi transcript. Giờ cắt theo
+  nguyên khối và mốc dừng ở message cuối thực sự được gửi đi; phần còn lại vào
+  lần tóm tắt sau.
+- **Summary mới xoá sạch summary cũ** (có từ Phase 4). `update_summary` ghi đè
+  mà transcript không chứa summary cũ, nên từ lần tóm tắt thứ hai mọi bối cảnh
+  trước đó mất hết. Giờ summary cũ đi đầu transcript trong khối
+  `<session_summary>`; prompt **summary v3** dặn gộp cũ + mới. Giữ v2 để rollback.
+- **Tóm tắt thất bại thì lượt nào cũng thử lại.** Summary bị `_is_safe` từ chối
+  mãi (vd model cứ chép lại câu injection) là tốn thêm một lần gọi API ở mọi lượt
+  sau. Giờ chờ thêm `SUMMARY_RETRY_AFTER_MESSAGES` (mặc định 6) message mới thử
+  lại. Trạng thái giữ trong bộ nhớ tiến trình: mỗi user về đúng một partition nên
+  đủ dùng, restart thì chỉ tốn thêm một lần thử.
+
 ## Còn nợ
 
-- **Chưa chạy `pytest -m live`** cho v3/summary v2 (không có API key ở môi trường
+- **Chưa chạy `pytest -m live`** cho v3/summary v3 (không có API key ở môi trường
   này). Prompt là phần duy nhất unit test không đo được chất lượng — chạy
   `OPENAI_API_KEY=sk-... pytest -m live -q` trước khi rollout, trong đó có nhóm
   `DELIMITER_ESCAPE` mới thêm.
