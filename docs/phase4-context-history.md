@@ -1,5 +1,7 @@
 # Phase 4 — Context & History
 
+> Phần prompt đã được rà lại ở [phase7](phase7-prompt-hardening.md): ranh giới khối dữ liệu, xử lý câu trả lời bị cắt cụt, trần độ dài ngữ cảnh. Bản mô tả dưới đây giữ nguyên trạng thái lúc kết thúc phase.
+
 Từ phase này consumer nhớ được mạch hội thoại: "vẫn đau như hôm qua" mới có
 nghĩa với model.
 

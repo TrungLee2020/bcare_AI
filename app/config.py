@@ -39,14 +39,19 @@ class Settings(BaseSettings):
     # SLA trả lời đã chốt ở Phase 0; timeout phải nhỏ hơn timeout của SSE để
     # client nhận được thông báo lỗi thay vì treo.
     openai_timeout_seconds: float = 25.0
-    openai_max_output_tokens: int = 800
+    # Phải đủ chỗ cho cả `answer` (~1500 ký tự tiếng Việt ≈ 600 token) lẫn
+    # `follow_up_questions` và phần khung JSON. Cắt cụt giữa chừng thì JSON
+    # hỏng -> parse lỗi -> tốn tiền API mà user không nhận được gì, nên để dư
+    # hơn là để vừa khít: chỉ token SINH RA mới bị tính tiền, trần cao không
+    # làm đắt thêm câu trả lời ngắn.
+    openai_max_output_tokens: int = 1000
     # Nhiệt độ thấp: đây là nội dung sức khoẻ/bảo hiểm, cần ổn định và bám sát
     # hướng dẫn hơn là sáng tạo.
     openai_temperature: float = 0.2
 
     # Prompt version đang chạy (file prompts/system_<version>.md).
     # Đổi prompt = đổi biến này, không cần sửa code.
-    prompt_version: str = "v2"
+    prompt_version: str = "v3"
     # Chặn câu trả lời dài bất thường (dấu hiệu model lan man hoặc bị dẫn dắt)
     answer_max_chars: int = 2000
 
@@ -59,9 +64,16 @@ class Settings(BaseSettings):
     # (10 message = 5 lượt hỏi-đáp). Tăng số này là tăng thẳng chi phí mỗi
     # câu hỏi, nên đổi thì phải đo lại chi phí.
     history_window_messages: int = 10
+    # Trần độ dài MỖI message cũ khi chở lại vào prompt. Không có trần thì
+    # 10 message × 2000 ký tự (giới hạn của ChatAskRequest) được chở lại ở MỌI
+    # câu hỏi sau trong phiên — user tự bơm chi phí lên vài lần chỉ bằng cách
+    # gửi câu hỏi thật dài. Phần bị cắt vẫn còn nguyên trong DB và trong summary.
+    history_message_max_chars: int = 600
+    # Trần độ dài transcript gửi đi tóm tắt, vì lý do y hệt.
+    summary_transcript_max_chars: int = 8000
     # Tóm tắt khi số message chưa tóm tắt vượt ngưỡng này
     summary_trigger_messages: int = 20
-    summary_prompt_version: str = "v1"
+    summary_prompt_version: str = "v2"
     summary_max_chars: int = 1500
 
     # Retry khi gọi OpenAI lỗi tạm thời (rate limit, timeout, 5xx)

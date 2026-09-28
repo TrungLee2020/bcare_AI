@@ -10,6 +10,7 @@ hoặc tự mâu thuẫn giữa out_of_scope và refusal_reason.
 import re
 from dataclasses import dataclass, field
 
+from app import metrics
 from app.config import settings
 from app.prompts import leaks_system_prompt
 from app.schemas import ChatAnswer
@@ -46,8 +47,27 @@ _DIAGNOSIS_PATTERNS = [
     r"\bban da mac benh\b",
 ]
 
+# Dấu hiệu cấp cứu. System prompt yêu cầu gặp các dấu hiệu này thì đặt
+# `should_see_doctor` = true, nhưng đó là hành vi của model — trước giờ không có
+# gì kiểm chứng. Danh sách cố ý viết hẹp, bám đúng các dấu hiệu nêu trong prompt.
+_EMERGENCY_PATTERNS = [
+    r"\bdau nguc (du doi|du don)\b",
+    r"\bkho tho\b",
+    r"\bco giat\b",
+    r"\bmat y thuc\b|\bngat xiu\b|\bhon me\b",
+    r"\bchay mau (khong cam|o at)\b",
+    r"\btu hai\b|\btu tu\b",
+    r"\b(di|den) (cap cuu|benh vien) ngay\b|\bgoi (115|cap cuu)\b",
+]
+
 _COMPILED_PRESCRIPTION = [re.compile(p) for p in _PRESCRIPTION_PATTERNS]
 _COMPILED_DIAGNOSIS = [re.compile(p) for p in _DIAGNOSIS_PATTERNS]
+_COMPILED_EMERGENCY = [re.compile(p) for p in _EMERGENCY_PATTERNS]
+
+
+def mentions_emergency(text: str) -> bool:
+    normalized = normalize(text)
+    return any(p.search(normalized) for p in _COMPILED_EMERGENCY)
 
 
 @dataclass
@@ -67,11 +87,14 @@ def validate(answer: ChatAnswer, prompt_version: str | None = None) -> Validatio
     text = answer.answer.strip()
     normalized = normalize(text)
 
+    follow_ups = [q.strip() for q in answer.follow_up_questions if q.strip()]
     if not text:
         reasons.append("empty_answer")
     if len(text) > settings.answer_max_chars:
         reasons.append("answer_too_long")
-    if leaks_system_prompt(text, version):
+    # Soi cả follow-up: chúng cũng được hiển thị cho user, nên một câu hướng dẫn
+    # bị chép vào đó là lộ prompt y như chép vào `answer`.
+    if leaks_system_prompt("\n".join([text, *follow_ups]), version):
         reasons.append("system_prompt_leak")
     if answer.out_of_scope and not answer.refusal_reason:
         reasons.append("missing_refusal_reason")
@@ -86,12 +109,21 @@ def validate(answer: ChatAnswer, prompt_version: str | None = None) -> Validatio
         return ValidationOutcome(ok=False, answer=FALLBACK_ANSWER, reasons=reasons)
 
     # Không fail vì mấy lỗi nhỏ này, chỉ cắt gọn lại cho đúng hợp đồng với FE.
+    #
+    # `should_see_doctor` thì chỉ BẬT thêm, không bao giờ tắt: câu trả lời nói
+    # tới dấu hiệu cấp cứu mà cờ vẫn false là model quên bật, và hướng sai duy
+    # nhất đáng sợ ở đây là bỏ sót. Ngược lại (cờ true mà nội dung không có dấu
+    # hiệu nào) thì để nguyên — model có thể có lý do mình không thấy.
+    escalate = not answer.should_see_doctor and mentions_emergency(text)
+    if escalate:
+        # Đếm riêng: con số này tăng đều nghĩa là prompt đang dạy model chưa đủ
+        # rõ về cờ cấp cứu, và đó là thứ phải sửa ở prompt chứ không phải ở đây.
+        metrics.incr("emergency_flag_forced")
     cleaned = answer.model_copy(
         update={
             "answer": text,
-            "follow_up_questions": [
-                q.strip() for q in answer.follow_up_questions if q.strip()
-            ][:MAX_FOLLOW_UPS],
+            "follow_up_questions": follow_ups[:MAX_FOLLOW_UPS],
+            "should_see_doctor": answer.should_see_doctor or escalate,
         }
     )
     return ValidationOutcome(ok=True, answer=cleaned)

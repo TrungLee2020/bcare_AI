@@ -34,10 +34,13 @@ class FakeOpenAI:
         answer: ChatAnswer | None = None,
         error: Exception | None = None,
         summary: SessionSummary | None = None,
+        finish_reason: str = "stop",
     ):
         self.answer = answer if answer is not None else make_answer()
         self.summary = summary if summary is not None else make_summary()
         self.error = error
+        # "length" = model chạm trần max_tokens và bị cắt giữa chừng
+        self.finish_reason = finish_reason
         self.calls: list[dict] = []
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
 
@@ -50,6 +53,11 @@ class FakeOpenAI:
         result = self.summary if name == "session_summary" else self.answer
         payload = json.dumps(result.model_dump(), ensure_ascii=False)
         return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=payload))],
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=payload),
+                    finish_reason=self.finish_reason,
+                )
+            ],
             usage=SimpleNamespace(prompt_tokens=800, completion_tokens=200),
         )

@@ -47,6 +47,7 @@ python -m scripts.loadtest --users 50 --questions 3  # cần Kafka/Redis/app đa
 | 4 | Ngữ cảnh hội thoại & tóm tắt phiên | [phase4](docs/phase4-context-history.md) |
 | 5 | SSE, retry/backoff, dead-letter | [phase5](docs/phase5-sse-resilience.md) |
 | 6 | Xác thực, rollout dần, đo chi phí | [phase6](docs/phase6-test-rollout.md) |
+| 7 | Rà lại logic prompt (ranh giới dữ liệu, cắt cụt, trần chi phí) | [phase7](docs/phase7-prompt-hardening.md) |
 
 ## Trước khi lên production
 
