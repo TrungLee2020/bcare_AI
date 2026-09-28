@@ -73,16 +73,25 @@ def clip(text: str, max_chars: int | None) -> str:
     return text[:max_chars].rstrip() + TRUNCATED
 
 
-def fence(tag: str, content: str, max_chars: int | None = None) -> str:
+def fence(
+    tag: str, content: str, max_chars: int | None = None, *, sanitize: bool = True
+) -> str:
     """
     Bọc `content` (dữ liệu không tin cậy) vào khối `<tag>...</tag>`.
 
     `max_chars` chặn trên độ dài để một message dài bất thường trong lịch sử
     không tự nhân chi phí của mọi câu hỏi sau trong phiên.
+
+    `sanitize=False` CHỈ dành cho `content` được ghép hoàn toàn từ các khối
+    `fence()` khác (vd transcript gồm các khối `<user>`/`<assistant>`): các khối
+    con đã được gỡ thẻ rồi, gỡ lần nữa là xoá luôn chính các thẻ cấu trúc mình
+    vừa dựng.
     """
     if tag not in RESERVED_TAGS:
         raise ValueError(f"Thẻ {tag!r} không nằm trong RESERVED_TAGS")
-    return f"<{tag}>\n{clip(sanitize_untrusted(content).strip(), max_chars)}\n</{tag}>"
+    if sanitize:
+        content = sanitize_untrusted(content)
+    return f"<{tag}>\n{clip(content.strip(), max_chars)}\n</{tag}>"
 
 
 @lru_cache(maxsize=16)

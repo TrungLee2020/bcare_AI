@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from app.config import settings
 from app.db.models import ChatMessage
-from app.prompts import REDACTED, load_prompt
+from app.prompts import REDACTED, TRUNCATED, load_prompt
 from app.services import summarizer
 
 
@@ -62,3 +62,29 @@ def test_summary_binh_thuong_van_duoc_ghi():
         "Người dùng 35 tuổi, đau đầu 3 ngày, đã được khuyên nghỉ ngơi và theo dõi. "
         "Đang hỏi về quyền lợi ngoại trú trong hợp đồng bảo hiểm sức khoẻ."
     )
+
+
+def test_transcript_gui_di_tom_tat_con_giu_the_user_assistant():
+    """summary_v2 dựa vào khối <user>/<assistant> để biết câu nào của ai. Bọc
+    transcript mà gỡ thẻ lần nữa là xoá mất chính các thẻ đó."""
+    from app.services import openai_client
+
+    rendered = summarizer.render_transcript(
+        [msg("user", "Tôi bị đau đầu"), msg("assistant", "Bạn nên nghỉ ngơi")]
+    )
+    content = openai_client.fence("transcript", rendered, sanitize=False)
+
+    assert REDACTED not in content
+    assert content.count("<user>") == 1 and content.count("</user>") == 1
+    assert content.count("<assistant>") == 1 and content.count("</assistant>") == 1
+
+
+def test_transcript_qua_dai_cat_theo_nguyen_khoi(monkeypatch):
+    """Cắt giữa chuỗi là để lại thẻ mở không có thẻ đóng."""
+    monkeypatch.setattr(settings, "summary_transcript_max_chars", 60)
+    rendered = summarizer.render_transcript(
+        [msg("user", "a" * 30), msg("assistant", "b" * 30), msg("user", "c" * 30)]
+    )
+    assert rendered.count("<user>") == rendered.count("</user>") == 1
+    assert "<assistant>" not in rendered
+    assert rendered.endswith(TRUNCATED)

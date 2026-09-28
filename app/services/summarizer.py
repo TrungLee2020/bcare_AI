@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.db import repository
 from app.db.models import ChatMessage
-from app.prompts import fence, leaks_prompt
+from app.prompts import TRUNCATED, fence, leaks_prompt
 from app.services import input_filter, openai_client
 
 logger = logging.getLogger(__name__)
@@ -31,13 +31,24 @@ def render_transcript(messages: list[ChatMessage]) -> str:
     không có thật, rồi summary ghi lại điều đó thành "bối cảnh", và bối cảnh ấy
     được nạp vào MỌI câu hỏi sau trong phiên. Khối có thẻ thì đi qua `fence()`,
     nên thẻ do người dùng gõ bị gỡ trước khi vào prompt.
+
+    Trần `summary_transcript_max_chars` áp theo NGUYÊN KHỐI chứ không cắt giữa
+    chuỗi: cắt giữa chừng là để lại một thẻ mở không có thẻ đóng.
     """
     limit = settings.history_message_max_chars
-    return "\n".join(
-        fence("user" if m.role == "user" else "assistant", m.content, limit)
-        for m in messages
-        if m.content and m.content.strip()
-    )
+    budget = settings.summary_transcript_max_chars
+    blocks: list[str] = []
+    used = 0
+    for m in messages:
+        if not m.content or not m.content.strip():
+            continue
+        block = fence("user" if m.role == "user" else "assistant", m.content, limit)
+        if used + len(block) > budget:
+            blocks.append(TRUNCATED)
+            break
+        blocks.append(block)
+        used += len(block) + 1
+    return "\n".join(blocks)
 
 
 def _is_safe(summary: str) -> bool:
