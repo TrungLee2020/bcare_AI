@@ -18,6 +18,14 @@ PROMPT_DIR = Path(__file__).resolve().parent.parent / "prompts"
 # đủ ngắn để bắt được khi model chép nguyên một câu trong hướng dẫn ra ngoài.
 LEAK_SHINGLE_SIZE = 8
 
+# Câu mà system prompt YÊU CẦU model nói với người dùng. Model làm đúng thì sẽ
+# chép gần nguyên văn, nên các cụm nằm gọn trong những câu này không được tính
+# là lộ prompt (nếu không, câu trả lời đúng hướng dẫn lại bị chặn). Sửa câu tương
+# ứng trong prompts/ thì phải sửa ở đây.
+ALLOWED_PHRASES = (
+    "đây là thông tin tham khảo, không thay thế khám chữa bệnh trực tiếp",
+)
+
 
 @lru_cache(maxsize=16)
 def load_prompt(kind: str, version: str) -> str:
@@ -51,8 +59,13 @@ def prompt_shingles(version: str, size: int = LEAK_SHINGLE_SIZE) -> frozenset[st
     """Tập các cụm `size` từ liên tiếp trong system prompt, dùng để phát hiện
     câu trả lời có chép lại nội dung hướng dẫn hệ thống hay không."""
     words = _words(load_system_prompt(version))
+    allowed = [" ".join(_words(p)) for p in ALLOWED_PHRASES]
     return frozenset(
-        " ".join(words[i : i + size]) for i in range(len(words) - size + 1)
+        shingle
+        for shingle in (
+            " ".join(words[i : i + size]) for i in range(len(words) - size + 1)
+        )
+        if not any(shingle in phrase for phrase in allowed)
     )
 
 

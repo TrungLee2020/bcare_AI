@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     # Nhiệt độ thấp: đây là nội dung sức khoẻ/bảo hiểm, cần ổn định và bám sát
     # hướng dẫn hơn là sáng tạo.
     openai_temperature: float = 0.2
+    # Chỉ áp dụng cho model reasoning (gpt-5*, o*), thay cho temperature.
+    # Thấp = nhanh, rẻ, và ít nguy cơ tiêu hết max_completion_tokens vào suy luận.
+    openai_reasoning_effort: str = "low"
+    # Token suy luận được tính vào max_completion_tokens: cộng thêm khoản này
+    # cho model reasoning, không thì hết ngân sách giữa chừng và trả về rỗng.
+    openai_reasoning_token_budget: int = 2000
 
     # Prompt version đang chạy (file prompts/system_<version>.md).
     # Đổi prompt = đổi biến này, không cần sửa code.

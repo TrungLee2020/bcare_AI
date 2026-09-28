@@ -28,13 +28,16 @@ BLOCKED_ANSWER = ChatAnswer(
 
 
 async def answer_question(
-    message: ChatRequestMessage, context: ConversationContext | None = None
+    message: ChatRequestMessage,
+    context: ConversationContext | None = None,
+    model: str | None = None,
 ) -> ChatResponseMessage:
     """
     Sinh câu trả lời cho 1 request, có thể kèm ngữ cảnh hội thoại (Phase 4). Lỗi gọi OpenAI được ném lên cho consumer
     (retry/backoff/dead-letter là việc của Phase 5).
     """
     version = settings.prompt_version
+    model = model or settings.openai_model
 
     def _response(
         answer: ChatAnswer, status: str, detail: str = "", usage: dict | None = None
@@ -47,7 +50,7 @@ async def answer_question(
             status=status,
             answer=answer,
             prompt_version=version,
-            model=settings.openai_model,
+            model=model,
             detail=detail,
             usage=usage or {},
         )
@@ -68,7 +71,9 @@ async def answer_question(
         metrics.incr("input_blocked")
         return _response(BLOCKED_ANSWER, "blocked", ",".join(verdict.reasons))
 
-    generation = await openai_client.generate(message.content, version, context)
+    generation = await openai_client.generate(
+        message.content, version, context, model
+    )
     usage = generation.usage.as_dict()
     metrics.incr("openai_calls")
     metrics.incr("tokens_total", generation.usage.total_tokens)
