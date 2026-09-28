@@ -23,7 +23,7 @@ FE --POST /chat/ask--> [auth] -> [rollout] -> [idempotency] -> [quota] -> Kafka(
 ```bash
 pip install -r requirements-dev.txt
 cp .env.example .env          # đặt OPENAI_API_KEY và AUTH_SECRET
-python -m scripts.create_topics
+python -m scripts.create_topics   # production: xem docs/phase8
 psql "$DATABASE_URL" -f db/schema.sql
 uvicorn app.main:app --reload
 ```
@@ -31,7 +31,7 @@ uvicorn app.main:app --reload
 ## Test
 
 ```bash
-pytest -q                                            # 212 test, không cần hạ tầng
+pytest -q                                            # 238 test, không cần hạ tầng
 TEST_DATABASE_URL=postgresql+asyncpg://... pytest -q  # cùng bộ đó trên Postgres thật
 OPENAI_API_KEY=sk-... pytest -m live -q              # 22 test gọi OpenAI thật
 python -m scripts.loadtest --users 50 --questions 3  # cần Kafka/Redis/app đang chạy
@@ -52,6 +52,6 @@ python -m scripts.loadtest --users 50 --questions 3  # cần Kafka/Redis/app đa
 
 ## Trước khi lên production
 
-Xem [phase8](docs/phase8-production-review.md) (mục "Chưa sửa" và "Bắt buộc trước khi rollout") và mục "Còn nợ" ở [phase6](docs/phase6-test-rollout.md). Tóm tắt những thứ
+Xem [phase8](docs/phase8-production-review.md) (mục "Còn lại" và "Bắt buộc trước khi rollout") và mục "Còn nợ" ở [phase6](docs/phase6-test-rollout.md). Tóm tắt những thứ
 **chưa từng chạy lần nào**: load test với Kafka thật, test injection với model
 thật (`pytest -m live`), fanout SSE nhiều instance, và kiểm qua nginx/LB thật.

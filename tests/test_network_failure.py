@@ -86,8 +86,9 @@ async def test_mat_mang_giua_chung_roi_gui_lai_khong_mat_khong_lap(wired, redis)
 
     # KHÔNG MẤT: mở lại SSE thì vẫn nhận được câu trả lời đã phát lúc offline
     # [1:]: bỏ khung mở đầu (retry + ping), chỉ đếm câu trả lời
+    # Kết nối mới (không mốc) vẫn nhận câu trả lời vừa phát trong vài giây
     frames = [f async for f in event_stream(StubRequest(0), USER_ID, None)][1:]
-    assert frames == []  # chưa gửi last_request_id thì không phát lại
+    assert len(frames) == 1 and request_id in frames[0]
 
     replayed = [
         f async for f in event_stream(StubRequest(0), USER_ID, uuid4())

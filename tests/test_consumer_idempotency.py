@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from aiokafka import TopicPartition
 
 from app.kafka import consumer
 from app.redis_client import set_redis
@@ -18,11 +19,11 @@ from app.sse import replay
 from tests.fake_openai import FakeOpenAI
 
 
-def record(message: ChatRequestMessage, offset: int = 0):
+def record(message: ChatRequestMessage, offset: int = 0, partition: int = 0):
     return SimpleNamespace(
         value=message.model_dump_json().encode(),
         topic="chat_requests",
-        partition=0,
+        partition=partition,
         offset=offset,
         key=b"1",
     )
@@ -83,12 +84,22 @@ async def test_bo_dem_replay_chi_ghi_mot_lan_moi_cau_tra_loi(redis, wired):
 
 
 class FakeKafkaConsumer:
-    """Thay AIOKafkaConsumer: phát lần lượt các record, ghi lại lần commit."""
+    """Thay AIOKafkaConsumer: phát các record theo partition qua getmany(),
+    ghi lại offset đã commit của từng partition."""
 
     def __init__(self, records):
-        self.records = list(records)
-        self.commits = 0
+        self.pending = list(records)
+        self.committed: dict[int, int] = {}
+        self.commit_calls = 0
         self.stopped = False
+        self.paused: set = set()
+
+    @property
+    def commits(self) -> int:
+        return self.commit_calls
+
+    def subscribe(self, topics, listener=None):
+        self.listener = listener
 
     async def start(self):
         pass
@@ -96,16 +107,34 @@ class FakeKafkaConsumer:
     async def stop(self):
         self.stopped = True
 
-    async def commit(self):
-        self.commits += 1
+    async def commit(self, offsets):
+        self.commit_calls += 1
+        for tp, offset in offsets.items():
+            self.committed[tp.partition] = offset
 
-    def __aiter__(self):
-        return self
+    def pause(self, *tps):
+        self.paused.update(tps)
 
-    async def __anext__(self):
-        if self.records:
-            return self.records.pop(0)
-        await asyncio.Event().wait()  # topic yên: chờ mãi như Kafka thật
+    def resume(self, *tps):
+        self.paused.difference_update(tps)
+
+    async def getmany(self, timeout_ms=0):
+        if not self.pending:
+            await asyncio.sleep(min(timeout_ms, 20) / 1000)  # topic yên
+            return {}
+        batch: dict = {}
+        for r in self.pending:
+            batch.setdefault(TopicPartition(r.topic, r.partition), []).append(r)
+        self.pending = []
+        return batch
+
+
+async def wait_until(condition, seconds: float = 3.0):
+    for _ in range(int(seconds / 0.01)):
+        if condition():
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("Hết giờ chờ")
 
 
 async def test_loi_ha_tang_khong_lam_chet_vong_lap_consumer(redis, wired, monkeypatch):
@@ -130,10 +159,7 @@ async def test_loi_ha_tang_khong_lam_chet_vong_lap_consumer(redis, wired, monkey
 
     consumer.start_consumer()
     try:
-        for _ in range(200):
-            if fake.commits == 2:
-                break
-            await asyncio.sleep(0.01)
+        await wait_until(lambda: fake.commits == 2)
         assert consumer.is_alive()
     finally:
         await consumer.stop_consumer()
@@ -149,7 +175,7 @@ async def test_tat_consumer_khi_dang_ranh_khong_bi_treo(redis, wired, monkeypatc
     monkeypatch.setattr(consumer, "AIOKafkaConsumer", lambda *a, **k: fake)
     consumer.start_consumer()
     await asyncio.sleep(0.01)
-    await asyncio.wait_for(consumer.stop_consumer(), timeout=1)
+    await asyncio.wait_for(consumer.stop_consumer(), timeout=2)
     assert fake.stopped
 
 
@@ -178,10 +204,7 @@ async def test_loi_khong_tu_het_thi_chuyen_dlq_thay_vi_ket_ca_partition(
     monkeypatch.setattr(consumer, "_handle", handle)
     consumer.start_consumer()
     try:
-        for _ in range(200):
-            if fake.commits == 2:
-                break
-            await asyncio.sleep(0.01)
+        await wait_until(lambda: fake.commits == 2)
     finally:
         await consumer.stop_consumer()
 
@@ -192,3 +215,104 @@ async def test_loi_khong_tu_het_thi_chuyen_dlq_thay_vi_ket_ca_partition(
         (broken.request_id, "error"),
         (after.request_id, "ok"),
     ]
+
+
+async def test_partition_cham_khong_chan_partition_khac(redis, wired, monkeypatch):
+    """Mục tiêu của worker theo partition: trước đây cả instance xử lý tuần tự,
+    một câu chậm (retry OpenAI) làm mọi user trên instance cùng chờ."""
+    published, _ = wired
+    slow, fast = question(), question()
+    release = asyncio.Event()
+    real = consumer._handle
+
+    async def handle(message):
+        if message.request_id == slow.request_id:
+            await release.wait()
+        await real(message)
+
+    monkeypatch.setattr(consumer, "_handle", handle)
+    fake = FakeKafkaConsumer([record(slow, 0, partition=0), record(fast, 0, partition=1)])
+    monkeypatch.setattr(consumer, "AIOKafkaConsumer", lambda *a, **k: fake)
+    consumer.start_consumer()
+    try:
+        await wait_until(lambda: fake.committed.get(1) == 1)
+        assert [r.request_id for r in published] == [fast.request_id]
+        assert 0 not in fake.committed  # câu chậm chưa xong thì chưa commit
+        release.set()
+        await wait_until(lambda: fake.committed.get(0) == 1)
+    finally:
+        await consumer.stop_consumer()
+
+
+async def test_trong_mot_partition_van_dung_thu_tu(redis, wired, monkeypatch):
+    """Partition key = user_id: câu hỏi của cùng một user phải được trả lời
+    đúng thứ tự đã gửi."""
+    published, _ = wired
+    questions = [question() for _ in range(5)]
+    fake = FakeKafkaConsumer([record(q, i, partition=0) for i, q in enumerate(questions)])
+    monkeypatch.setattr(consumer, "AIOKafkaConsumer", lambda *a, **k: fake)
+    consumer.start_consumer()
+    try:
+        await wait_until(lambda: fake.committed.get(0) == 5)
+    finally:
+        await consumer.stop_consumer()
+    assert [r.request_id for r in published] == [q.request_id for q in questions]
+
+
+async def test_gioi_han_so_cau_xu_ly_cung_luc(redis, wired, monkeypatch):
+    """Trần theo rate limit OpenAI: 4 partition nhưng chỉ cho 2 câu chạy cùng lúc."""
+    monkeypatch.setattr(consumer.settings, "max_concurrent_answers", 2)
+    running = {"now": 0, "max": 0}
+    real = consumer._handle
+
+    async def handle(message):
+        running["now"] += 1
+        running["max"] = max(running["max"], running["now"])
+        await asyncio.sleep(0.05)
+        running["now"] -= 1
+        await real(message)
+
+    monkeypatch.setattr(consumer, "_handle", handle)
+    fake = FakeKafkaConsumer([record(question(), 0, partition=p) for p in range(4)])
+    monkeypatch.setattr(consumer, "AIOKafkaConsumer", lambda *a, **k: fake)
+    consumer.start_consumer()
+    try:
+        await wait_until(lambda: len(fake.committed) == 4)
+    finally:
+        await consumer.stop_consumer()
+    assert running["max"] == 2
+
+
+async def test_partition_bi_thu_hoi_thi_dung_worker_cua_no(redis, wired, monkeypatch):
+    """Rebalance: partition chuyển sang instance khác thì worker ở đây phải
+    dừng, nếu không 2 instance cùng xử lý 1 partition."""
+    fake = FakeKafkaConsumer([])
+    monkeypatch.setattr(consumer, "AIOKafkaConsumer", lambda *a, **k: fake)
+    consumer.start_consumer()
+    try:
+        await wait_until(lambda: hasattr(fake, "listener"))
+        tp = TopicPartition("chat_requests", 3)
+        worker = fake.listener.get(tp)
+        await fake.listener.on_partitions_revoked([tp])
+        assert worker.task.done()
+        assert tp not in fake.listener.by_tp
+    finally:
+        await consumer.stop_consumer()
+
+
+async def test_partition_don_viec_thi_tam_ngung_doc(monkeypatch):
+    monkeypatch.setattr(consumer.settings, "kafka_max_buffered_per_partition", 4)
+    fake = FakeKafkaConsumer([])
+    workers = consumer._Workers(fake, asyncio.Semaphore(1))
+    tp = TopicPartition("chat_requests", 0)
+    worker = workers.get(tp)
+    worker.task.cancel()  # không cho worker rút bớt hàng đợi trong test này
+    for i in range(4):
+        worker.queue.put_nowait(i)
+
+    workers.apply_backpressure()
+    assert tp in fake.paused
+    for _ in range(3):
+        worker.queue.get_nowait()
+    workers.apply_backpressure()
+    assert tp not in fake.paused

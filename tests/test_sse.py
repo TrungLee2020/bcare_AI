@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import timedelta
 from uuid import uuid4
 
 import pytest
@@ -71,9 +72,22 @@ async def test_replay_tra_ve_dung_phan_sau_moc(redis):
     assert [m.request_id for m in missed] == [second.request_id, third.request_id]
 
 
-async def test_khong_gui_last_request_id_thi_khong_phat_lai(redis):
-    await replay.remember(redis, response())
+async def test_ket_noi_moi_khong_phat_lai_cau_tra_loi_cu(redis):
+    """Mở trang không được nhận lại cả lịch sử."""
+    old = response()
+    old.created_at -= timedelta(seconds=settings.sse_replay_on_connect_seconds + 5)
+    await replay.remember(redis, old)
     assert await replay.missed_since(redis, 1, None) == []
+
+
+async def test_ket_noi_moi_van_nhan_cau_tra_loi_vua_toi_truoc_khi_ket_noi(redis):
+    """Câu bị chặn ở lớp input trả về trong vài ms, có thể tới TRƯỚC khi SSE
+    kịp mở. Không phát lại thì câu trả lời đó không bao giờ tới client."""
+    fresh = response()
+    await replay.remember(redis, fresh)
+    assert [m.request_id for m in await replay.missed_since(redis, 1, None)] == [
+        fresh.request_id
+    ]
 
 
 async def test_last_request_id_la_moi_nhat_thi_khong_co_gi_de_phat_lai(redis):

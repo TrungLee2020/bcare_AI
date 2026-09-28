@@ -1,7 +1,8 @@
+import hmac
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Response, status
+from fastapi import FastAPI, HTTPException, Request, Response, status
 
 from app import metrics
 from app.api.chat import router as chat_router
@@ -9,6 +10,7 @@ from app.sse.stream import router as sse_router
 from app.config import settings
 from app.db.session import start_db, stop_db
 from app.kafka import consumer, response_consumer
+from app.kafka.topics import verify_production_topics
 from app.kafka.consumer import start_consumer, stop_consumer
 from app.kafka.response_consumer import start_response_consumer, stop_response_consumer
 from app.kafka.producer import publish_chat_request, start_producer, stop_producer
@@ -22,6 +24,34 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
+
+
+# HMAC-SHA256 cần secret ít nhất 32 byte ngẫu nhiên; secret ngắn đoán được.
+MIN_SECRET_LENGTH = 32
+
+
+def production_config_problems() -> list[str]:
+    """Những thứ không được phép ở production. Rỗng = đạt."""
+    problems = []
+    if not settings.auth_required:
+        problems.append("AUTH_REQUIRED phải là true")
+    if len(settings.auth_secret) < MIN_SECRET_LENGTH:
+        problems.append(f"AUTH_SECRET phải dài ít nhất {MIN_SECRET_LENGTH} ký tự")
+    if settings.enable_test_endpoints:
+        problems.append("ENABLE_TEST_ENDPOINTS phải là false (endpoint test bỏ qua quota)")
+    if not settings.metrics_token:
+        problems.append("METRICS_TOKEN phải được đặt (/metrics lộ chi phí và lưu lượng)")
+    if not settings.openai_api_key:
+        problems.append("OPENAI_API_KEY trống")
+    return problems
+
+
+def _check_production_config() -> None:
+    problems = production_config_problems()
+    if problems:
+        raise RuntimeError(
+            "APP_ENV=production nhưng cấu hình chưa đạt: " + "; ".join(problems)
+        )
 
 
 def _check_auth_config() -> None:
@@ -42,6 +72,9 @@ def _check_auth_config() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _check_auth_config()
+    if settings.app_env == "production":
+        _check_production_config()
+        await verify_production_topics()
     await start_redis()
     await start_db()
     start_openai()
@@ -80,9 +113,18 @@ async def health(response: Response) -> dict:
 
 
 @app.get("/metrics")
-async def read_metrics() -> dict:
+async def read_metrics(request: Request) -> dict:
     """Số liệu của RIÊNG instance này, reset khi restart. Đủ để theo dõi giai
-    đoạn rollout; mở rộng thì thay bằng Prometheus exporter."""
+    đoạn rollout; mở rộng thì thay bằng Prometheus exporter.
+
+    Cần `Authorization: Bearer <METRICS_TOKEN>` khi METRICS_TOKEN được đặt
+    (production bắt buộc đặt): số liệu này lộ chi phí và lưu lượng thật.
+    """
+    if settings.metrics_token:
+        header = request.headers.get("authorization", "")
+        given = header[7:].strip() if header.lower().startswith("bearer ") else ""
+        if not hmac.compare_digest(given.encode(), settings.metrics_token.encode()):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
     return metrics.snapshot()
 
 

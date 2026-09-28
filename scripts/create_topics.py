@@ -1,50 +1,58 @@
 """
-Tạo các topic Kafka cần thiết cho môi trường dev/local.
-
-Production nên tạo topic bằng IaC/admin tool của hạ tầng, không chạy script này.
-Điểm quan trọng: `chat_requests` phải có NHIỀU HƠN 1 partition, nếu không thì
-mọi user dồn vào 1 partition và mất hết khả năng xử lý song song.
+Tạo các topic Kafka theo cấu hình ở `app/kafka/topics.py`.
 
     python -m scripts.create_topics
+
+Production: đặt KAFKA_REPLICATION_FACTOR=3 và KAFKA_MIN_INSYNC_REPLICAS=2 trước
+khi chạy. Với APP_ENV=production script từ chối tạo topic ít bản sao hơn — và
+app cũng từ chối khởi động nếu topic không đạt (xem verify_production_topics).
+
+Topic đã tồn tại thì KHÔNG bị sửa: đổi số partition hay số bản sao của topic
+đang chạy là thao tác vận hành phải làm có chủ đích, không phải việc của script.
 """
 
 import asyncio
 import logging
 
-from aiokafka.admin import AIOKafkaAdminClient, NewTopic
+from aiokafka.admin import AIOKafkaAdminClient
 
 from app.config import settings
+from app.kafka.topics import layout_problems, topic_specs
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("create_topics")
 
 
 async def main() -> None:
+    if settings.app_env == "production" and (
+        settings.kafka_replication_factor < 3 or settings.kafka_min_insync_replicas < 2
+    ):
+        raise SystemExit(
+            "APP_ENV=production cần KAFKA_REPLICATION_FACTOR>=3 và "
+            "KAFKA_MIN_INSYNC_REPLICAS>=2"
+        )
+
     admin = AIOKafkaAdminClient(bootstrap_servers=settings.kafka_bootstrap_servers)
     await admin.start()
     try:
         existing = set(await admin.list_topics())
-        wanted = [
-            NewTopic(
-                name=name,
-                num_partitions=settings.kafka_num_partitions,
-                replication_factor=settings.kafka_replication_factor,
-            )
-            for name in (
-                settings.kafka_topic_chat_requests,
-                settings.kafka_topic_chat_responses,
-                settings.kafka_topic_dead_letter,
-            )
-            if name not in existing
-        ]
-        if not wanted:
+        wanted = [t for t in topic_specs() if t.name not in existing]
+        if wanted:
+            await admin.create_topics(wanted)
+            for topic in wanted:
+                logger.info(
+                    "Đã tạo topic %s (partitions=%d, replication=%d, configs=%s)",
+                    topic.name,
+                    topic.num_partitions,
+                    topic.replication_factor,
+                    topic.topic_configs,
+                )
+        else:
             logger.info("Tất cả topic đã tồn tại, không tạo thêm")
-            return
-        await admin.create_topics(wanted)
-        for topic in wanted:
-            logger.info(
-                "Đã tạo topic %s (partitions=%d)", topic.name, topic.num_partitions
-            )
+
+        described = await admin.describe_topics([t.name for t in topic_specs()])
+        for problem in layout_problems(described, settings.kafka_replication_factor):
+            logger.warning("Topic có sẵn không khớp cấu hình: %s", problem)
     finally:
         await admin.close()
 

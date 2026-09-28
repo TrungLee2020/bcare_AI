@@ -85,33 +85,76 @@ Giữ v3 để rollback. v3 chưa từng chạy production (chưa qua `pytest -m
 
 v4 dài hơn v3 khoảng 2.000 ký tự, tức khoảng 700 token input mỗi câu hỏi.
 
-## Chưa sửa: cần quyết định trước khi mở rộng
+### Thông lượng
 
-1. **Thông lượng.** Consumer xử lý TUẦN TỰ mọi partition nó giữ, nên mỗi
-   instance chỉ chạy 1 lời gọi OpenAI tại một thời điểm, và tối đa 6 instance
-   (6 partition). Mỗi câu trả lời mất 3–6s, nên trần khoảng 60–120 câu/phút cho
-   cả hệ thống. Một câu chậm (retry OpenAI tới ~80s, cộng bước tóm tắt phiên
-   chạy ngay sau đó) chặn mọi user khác trong cùng partition. Khi cần nhiều hơn:
-   xử lý song song theo partition (mỗi partition một task, commit riêng), tăng số
-   partition, và đưa bước tóm tắt ra khỏi đường nóng.
-2. **FE phải mở SSE TRƯỚC khi gọi `/chat/ask`.** Mở kết nối mới không kèm mốc
-   thì không phát lại gì cả, nên câu bị chặn ở lớp input (trả về trong vài ms)
-   có thể tới trước khi SSE kịp mở. Dự phòng: gọi lại `POST /chat/ask` với đúng
-   `request_id` sẽ trả `status="done"` kèm câu trả lời đã cache.
-3. **Token SSE hết hạn.** EventSource tự nối lại bằng URL cũ, token hết hạn thì
-   bị 401, và EventSource **ngừng hẳn** (không thử lại khi nhận lỗi HTTP). FE
-   phải bắt `onerror`, lấy token mới rồi mở lại kết nối.
-4. **Cấu hình Kafka production:** `KAFKA_REPLICATION_FACTOR=3`,
-   `min.insync.replicas=2` (có `acks=all` rồi). Consumer `chat_requests` dùng
-   `auto_offset_reset=earliest`, nên lần đầu chạy một group MỚI sẽ trả lời lại
-   mọi message còn trong topic. Phải xoá dữ liệu test / loadtest khỏi topic
-   trước khi mở, và đặt retention ngắn (ví dụ 1 ngày).
-5. **`/metrics` không có xác thực** và lộ chi phí. Chặn ở ingress. Số liệu chỉ
-   là của từng instance và reset khi restart.
-6. **Câu bị chặn ở lớp input vẫn trừ quota** (cố ý, để thử injection không miễn
-   phí). Bộ lọc đã bớt chặn nhầm, nhưng nên theo dõi tỉ lệ `input_blocked` và
-   đọc log mẫu trong tuần đầu.
-7. **DLQ chưa có công cụ replay.**
+Trước đây consumer xử lý TUẦN TỰ mọi partition nó giữ: mỗi instance chạy 1 lời
+gọi OpenAI tại một thời điểm, tối đa 6 instance, trần khoảng 60–120 câu/phút.
+Một câu chậm (retry OpenAI tới ~80s) làm mọi user trên instance đó cùng chờ.
+
+Giờ mỗi partition có một worker riêng: tuần tự TRONG partition để giữ thứ tự
+câu hỏi của từng user, song song GIỮA các partition. Offset commit riêng theo
+partition.
+- `MAX_CONCURRENT_ANSWERS` (mặc định 16): trần số câu một instance xử lý cùng
+  lúc. Đặt theo rate limit OpenAI (RPM/TPM) của tài khoản chia cho số instance.
+- `KAFKA_NUM_PARTITIONS` mặc định 24 (trước là 6): trần song song của cả hệ
+  thống. **Topic đang có 6 partition thì phải tạo lại** (xem
+  `scripts/reset_test_data.py`). Tăng partition trên topic đang chạy sẽ đổi user
+  nào rơi vào partition nào.
+- Partition dồn quá `KAFKA_MAX_BUFFERED_PER_PARTITION` message thì tạm ngừng
+  đọc (không kéo cả đống vào RAM).
+- Rebalance: partition bị chuyển đi thì worker của nó dừng trước (message đang
+  dở được chạy nốt), để 2 instance không cùng xử lý 1 partition.
+- `DB_POOL_SIZE` mặc định 10 (trước là 5) cho đủ số câu chạy cùng lúc.
+
+Ước tính với 24 partition, mỗi câu 3–6s: khoảng 240–480 câu/phút (nếu rate
+limit OpenAI cho phép). Con số thật phải đo bằng `scripts/loadtest.py`.
+
+### Chuyển từ test sang dữ liệu thật
+
+- **`APP_ENV=production`: app từ chối khởi động** nếu cấu hình còn là của môi
+  trường test: `AUTH_REQUIRED=false`, `AUTH_SECRET` dưới 32 ký tự, bật
+  `ENABLE_TEST_ENDPOINTS`, thiếu `METRICS_TOKEN` hoặc `OPENAI_API_KEY`, topic
+  Kafka chưa có hoặc có replication factor dưới 3.
+- **Topic** (`app/kafka/topics.py`, `scripts/create_topics.py`): tạo với
+  `min.insync.replicas` và retention theo topic (requests 1 ngày, responses 1
+  giờ, DLQ 14 ngày). Với APP_ENV=production, script từ chối tạo topic có
+  replication factor dưới 3.
+- **Câu hỏi quá `REQUEST_MAX_AGE_SECONDS` (600s) bị bỏ qua**, không gọi OpenAI.
+  Hoàn quota nếu còn trong ngày, và đẩy status=error. Chặn luôn cả việc
+  consumer group mới (`auto_offset_reset=earliest`) trả lời lại dữ liệu test
+  còn trong topic, và việc trả lời hàng loạt câu cũ sau khi consumer ngừng lâu.
+- **`scripts/reset_test_data.py`**: xoá và tạo lại topic, xoá key của app trong
+  Redis (theo tiền tố, không FLUSHDB), xoá lịch sử chat trong Postgres. Mặc định
+  chỉ in ra sẽ xoá gì; `--yes` mới xoá thật; từ chối chạy khi APP_ENV=production.
+- **`/metrics` cần `Authorization: Bearer <METRICS_TOKEN>`.**
+- Hoàn quota không còn cộng nhầm vào ngày hôm sau (counter của ngày hôm trước
+  đã hết hạn).
+
+### SSE: câu trả lời tới trước khi kịp mở kết nối
+
+Kết nối SSE mới (không kèm mốc) trước đây không được phát lại gì cả. Câu bị chặn
+ở lớp input trả về trong vài ms, nên có thể tới trước khi SSE kịp mở và không
+bao giờ tới client. Giờ kết nối mới được phát lại các câu trả lời của
+`SSE_REPLAY_ON_CONNECT_SECONDS` (10s) gần nhất. Client nhận trùng thì bỏ qua
+được theo `id`.
+
+### Lộ câu trả lời qua request_id
+
+Gọi `POST /chat/ask` với `request_id` của người khác thì nhận về nguyên câu trả
+lời sức khoẻ đã cache của họ, vì không có bước kiểm tra chủ sở hữu. Giờ trả 409.
+
+## Còn lại
+
+1. **Token SSE hết hạn.** Kết nối đang mở không bị cắt khi token hết hạn (chỉ
+   xác thực lúc mở). Nhưng lúc EventSource tự nối lại bằng token đã hết hạn thì
+   nhận 401, và EventSource ngừng hẳn. Backend không sửa được việc này: client
+   phải dùng token mới khi mở lại kết nối.
+2. **Câu bị chặn ở lớp input vẫn trừ quota** (cố ý, để thử injection không miễn
+   phí). Nên theo dõi tỉ lệ `input_blocked` trong tuần đầu.
+3. **DLQ chưa có công cụ replay.**
+4. Bước tóm tắt phiên vẫn chạy ngay sau khi trả lời, trong worker của
+   partition. Câu trả lời không bị chậm, nhưng câu KẾ TIẾP trong cùng partition
+   phải chờ bước tóm tắt xong.
 
 ## Bắt buộc trước khi rollout
 
@@ -119,6 +162,11 @@ v4 dài hơn v3 khoảng 2.000 ký tự, tức khoảng 700 token input mỗi c�
 OPENAI_API_KEY=sk-... pytest -m live -q   # 22 test: injection, cấp cứu, bảo hiểm, liều thuốc
 TEST_DATABASE_URL=postgresql+asyncpg://... pytest -q
 python -m scripts.loadtest --users 50 --questions 3   # Kafka/Redis thật, ≥2 instance
+
+# Chuyển cụm test sang dữ liệu thật (tắt app trước). Script tạo lại topic theo
+# cấu hình đang đặt, nên phải đặt sẵn số bản sao của production:
+KAFKA_REPLICATION_FACTOR=3 KAFKA_MIN_INSYNC_REPLICAS=2 python -m scripts.reset_test_data --yes
+# rồi khởi động app với APP_ENV=production (tự kiểm tra topic lúc khởi động)
 ```
 
 Ngoài ra, đội y tế và đội sản phẩm bảo hiểm phải đọc `prompts/system_v4.md` và

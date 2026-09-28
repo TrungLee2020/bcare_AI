@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -9,15 +11,36 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
+    # "production" bật các kiểm tra fail-closed lúc khởi động (app/main.py):
+    # thiếu secret, còn bật endpoint test, topic Kafka ít bản sao... thì từ
+    # chối chạy thay vì chạy "tạm" với cấu hình của môi trường test.
+    app_env: Literal["dev", "production"] = "dev"
+
     # Kafka
     kafka_bootstrap_servers: str = "localhost:9092"
     kafka_topic_chat_requests: str = "chat_requests"
     kafka_topic_chat_responses: str = "chat_responses"
     kafka_consumer_group: str = "bcare-ai-answering"
 
-    # Số partition mặc định khi tool test tự tạo topic (chỉ dùng cho môi trường dev/local)
-    kafka_num_partitions: int = 6
+    # Số partition khi tạo topic (scripts/create_topics.py). Là TRẦN số message
+    # xử lý song song của cả hệ thống: mỗi partition một worker tuần tự (để giữ
+    # thứ tự theo user). Tăng số partition của topic đang chạy sẽ đổi user nào
+    # rơi vào partition nào — chỉ làm khi topic đang trống.
+    kafka_num_partitions: int = 24
+    # Production: 3 (kèm min.insync.replicas=2). 1 chỉ dành cho local.
     kafka_replication_factor: int = 1
+    kafka_min_insync_replicas: int = 1
+    # Số câu trả lời một instance xử lý CÙNG LÚC (qua mọi partition nó giữ).
+    # Chặn trên bởi rate limit OpenAI của tài khoản (RPM/TPM) chia cho số
+    # instance, và bởi DB_POOL_SIZE + DB_MAX_OVERFLOW.
+    max_concurrent_answers: int = 16
+    # Partition dồn quá ngần này message chưa xử lý thì tạm ngừng đọc nó.
+    kafka_max_buffered_per_partition: int = 50
+    # Câu hỏi nằm trong topic lâu hơn ngần này thì bỏ qua, không gọi OpenAI:
+    # người hỏi đã thôi chờ từ lâu. Chặn luôn trường hợp consumer group mới
+    # (auto_offset_reset=earliest) đọc lại dữ liệu test cũ còn trong topic, và
+    # trường hợp consumer ngừng lâu rồi chạy lại trả lời cả đống câu hỏi cũ.
+    request_max_age_seconds: int = 600
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"
@@ -57,7 +80,8 @@ class Settings(BaseSettings):
 
     # Postgres (lịch sử chat)
     database_url: str = "postgresql+asyncpg://bcare:bcare@localhost:5432/bcare"
-    db_pool_size: int = 5
+    # Phải đủ cho MAX_CONCURRENT_ANSWERS câu xử lý cùng lúc.
+    db_pool_size: int = 10
     db_max_overflow: int = 10
 
     # Ngữ cảnh hội thoại: số message gần nhất chở nguyên văn vào prompt
@@ -98,6 +122,12 @@ class Settings(BaseSettings):
     # Số response gần nhất giữ lại cho mỗi user để replay khi client reconnect
     sse_replay_buffer_size: int = 20
     sse_replay_ttl_seconds: int = 3600
+    # Kết nối MỚI (không kèm mốc) vẫn được phát lại câu trả lời phát ra trong
+    # ngần này giây gần nhất. Không có nó thì câu trả lời tới NHANH HƠN lúc SSE
+    # kịp mở (vd câu bị chặn ở lớp input: vài ms) sẽ không bao giờ tới client.
+    # Để ngắn: mở lại trang trong khoảng này sẽ nhận lại câu trả lời vừa rồi
+    # (cùng id, client bỏ qua được).
+    sse_replay_on_connect_seconds: int = 10
 
     # Xác thực (Phase 6). Mặc định BẬT: user_id/tier lấy từ token đã ký, không
     # phải từ body do client gửi.
@@ -120,6 +150,10 @@ class Settings(BaseSettings):
     # Bật /test/enqueue (bypass quota, chỉ để verify pipeline Phase 1).
     # Mặc định TẮT — endpoint này bỏ qua quota nên không được bật ở production.
     enable_test_endpoints: bool = False
+
+    # Bearer token để đọc /metrics (số liệu chi phí, lưu lượng). Trống = không
+    # cần token (chỉ dành cho dev); production bắt buộc đặt.
+    metrics_token: str = ""
 
     def quota_limit_for_tier(self, tier: str) -> int:
         return {
