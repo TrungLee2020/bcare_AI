@@ -90,7 +90,10 @@ async def test_retry_dong_thoi_cung_request_id_chi_qua_1_cai(client, producer):
 async def test_duplicate_tra_lai_cau_tra_loi_da_cache(client, producer, redis):
     rid = str(uuid4())
     await client.post("/chat/ask", json=body(request_id=rid), headers=auth())
-    await idempotency.save_response(redis, rid, {"answer": "Bạn nên nghỉ ngơi..."})
+    # Payload thật là ChatResponseMessage, luôn có user_id của chủ câu hỏi
+    await idempotency.save_response(
+        redis, rid, {"user_id": 100, "answer": "Bạn nên nghỉ ngơi..."}
+    )
 
     resp = await client.post("/chat/ask", json=body(request_id=rid), headers=auth())
     assert resp.status_code == 200
@@ -143,3 +146,17 @@ async def test_content_rong_bi_tu_choi(client, producer):
     resp = await client.post("/chat/ask", json=body(content=""), headers=auth())
     assert resp.status_code == 422
     assert not producer.published
+
+
+async def test_khong_doc_duoc_cau_tra_loi_cua_user_khac_qua_request_id(client, producer, redis):
+    """request_id do client tự sinh: trả câu trả lời cache mà không đối chiếu chủ
+    sở hữu là ai có request_id của người khác cũng đọc được câu trả lời của họ."""
+    rid = str(uuid4())
+    await client.post("/chat/ask", json=body(request_id=rid), headers=auth(user_id=100))
+    await idempotency.save_response(
+        redis, rid, {"user_id": 100, "answer": "Bạn có dấu hiệu trầm cảm..."}
+    )
+
+    resp = await client.post("/chat/ask", json=body(request_id=rid), headers=auth(user_id=200))
+    assert resp.status_code == 409
+    assert "trầm cảm" not in resp.text

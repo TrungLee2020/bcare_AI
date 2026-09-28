@@ -23,7 +23,7 @@ async def load_context(message: ChatRequestMessage) -> ConversationContext:
         return ConversationContext()
     async with db_session() as db:
         return await repository.load_context(
-            db, message.session_id, settings.history_window_messages
+            db, message.session_id, message.user_id, settings.history_window_messages
         )
 
 
@@ -35,7 +35,17 @@ async def record_turn(
         return
 
     async with db_session() as db:
-        await repository.ensure_session(db, message.session_id, message.user_id)
+        session = await repository.ensure_session(db, message.session_id, message.user_id)
+        if session.user_id != message.user_id:
+            # Không ghi lượt của user này vào phiên của người khác: nếu ghi,
+            # chủ phiên sẽ thấy nội dung lạ trong ngữ cảnh (và trong summary)
+            # của chính họ — một đường chèn injection vào phiên người khác.
+            logger.warning(
+                "user_id=%s gửi session_id=%s thuộc user khác, không ghi lịch sử",
+                message.user_id,
+                message.session_id,
+            )
+            return
         await repository.save_turn(
             db,
             session_id=message.session_id,

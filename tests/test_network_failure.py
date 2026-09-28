@@ -19,7 +19,7 @@ from app.auth import issue_token
 from app.kafka import consumer
 from app.redis_client import set_redis
 from app.services import openai_client, quota
-from app.sse import hub, replay
+from app.sse import hub
 from app.sse.stream import event_stream
 from tests.fake_openai import FakeOpenAI
 from tests.test_sse import StubRequest
@@ -41,8 +41,8 @@ async def wired(redis, monkeypatch):
         enqueued.append(message)
 
     async def fake_publish_response(response):
-        # Đây chính là việc response_consumer làm khi nhận message từ Kafka
-        await replay.remember(redis, response)
+        # Đây chính là việc response_consumer làm khi nhận message từ Kafka.
+        # Bộ đệm replay thì consumer đã ghi trước khi publish.
         hub.publish(response)
 
     monkeypatch.setattr("app.api.chat.publish_chat_request", fake_enqueue)
@@ -85,12 +85,14 @@ async def test_mat_mang_giua_chung_roi_gui_lai_khong_mat_khong_lap(wired, redis)
     assert await quota.remaining(redis, USER_ID, "free") == 1
 
     # KHÔNG MẤT: mở lại SSE thì vẫn nhận được câu trả lời đã phát lúc offline
-    frames = [f async for f in event_stream(StubRequest(0), USER_ID, None)]
-    assert frames == []  # chưa gửi last_request_id thì không phát lại
+    # [1:]: bỏ khung mở đầu (retry + ping), chỉ đếm câu trả lời
+    # Kết nối mới (không mốc) vẫn nhận câu trả lời vừa phát trong vài giây
+    frames = [f async for f in event_stream(StubRequest(0), USER_ID, None)][1:]
+    assert len(frames) == 1 and request_id in frames[0]
 
     replayed = [
         f async for f in event_stream(StubRequest(0), USER_ID, uuid4())
-    ]  # mốc lạ -> phát lại toàn bộ
+    ][1:]  # mốc lạ -> phát lại toàn bộ
     assert len(replayed) == 1
     assert request_id in replayed[0]
 
@@ -111,7 +113,7 @@ async def test_reconnect_giua_hai_cau_hoi_chi_nhan_phan_con_thieu(wired, redis, 
         await consumer._handle(enqueued[-1])
 
     # Client đã nhận tới câu 1, rớt mạng, reconnect
-    missed = [f async for f in event_stream(StubRequest(0), USER_ID, ids[0])]
+    missed = [f async for f in event_stream(StubRequest(0), USER_ID, ids[0])][1:]
     assert len(missed) == 2
     assert ids[1] in missed[0] and ids[2] in missed[1]
 

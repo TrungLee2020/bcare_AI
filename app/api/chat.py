@@ -44,6 +44,18 @@ async def ask(
     is_new = await idempotency.claim(redis, request_id)
     if not is_new:
         cached = await idempotency.get_cached_response(redis, request_id)
+        if cached is not None and cached.get("user_id") != principal.user_id:
+            # request_id do client tự sinh: trả câu trả lời đã cache mà không
+            # đối chiếu chủ sở hữu là ai có request_id của người khác cũng đọc
+            # được câu trả lời sức khoẻ của họ.
+            metrics.incr("ask_foreign_request_id")
+            logger.warning(
+                "user_id=%s dùng request_id=%s của user khác", principal.user_id, request_id
+            )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="request_id này đã được dùng, hãy tạo request_id mới.",
+            )
         metrics.incr("ask_duplicate")
         logger.info(
             "Duplicate request_id=%s user_id=%s (đã có câu trả lời: %s)",

@@ -66,7 +66,15 @@ async def answer_question(
             verdict.matches,
         )
         metrics.incr("input_blocked")
-        return _response(BLOCKED_ANSWER, "blocked", ",".join(verdict.reasons))
+        # Câu bị chặn mà có dấu hiệu cấp cứu thì vẫn phải bảo người ta đi cấp
+        # cứu: chặn nhầm một câu thật là chuyện có thể xảy ra (xem
+        # input_filter), và cái giá của việc im lặng ở đây quá đắt.
+        blocked = (
+            output_validator.EMERGENCY_FALLBACK_ANSWER
+            if output_validator.mentions_emergency(message.content)
+            else BLOCKED_ANSWER
+        )
+        return _response(blocked, "blocked", ",".join(verdict.reasons))
 
     generation = await openai_client.generate(message.content, version, context)
     usage = generation.usage.as_dict()
@@ -74,7 +82,7 @@ async def answer_question(
     metrics.incr("tokens_total", generation.usage.total_tokens)
     metrics.incr("cost_usd", usage["cost_usd"])
 
-    outcome = output_validator.validate(generation.answer, version)
+    outcome = output_validator.validate(generation.answer, version, message.content)
     if not outcome.ok:
         logger.warning(
             "Câu trả lời không qua validate request_id=%s reasons=%s",

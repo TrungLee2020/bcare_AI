@@ -31,6 +31,33 @@ FALLBACK_ANSWER = ChatAnswer(
     follow_up_questions=[],
 )
 
+# Thay cho câu trả lời bị chặn khi câu hỏi HOẶC câu trả lời có dấu hiệu cấp cứu.
+# FALLBACK_ANSWER ("thử hỏi lại rõ hơn") ở đúng tình huống này là nguy hiểm:
+# model đã nói "gọi 115 ngay" nhưng lỡ kèm một liều thuốc, bị chặn vì liều thuốc,
+# và người đang đau ngực nhận về lời khuyên hỏi lại cho rõ.
+EMERGENCY_FALLBACK_ANSWER = ChatAnswer(
+    answer=(
+        "Những gì bạn mô tả có thể là dấu hiệu cần cấp cứu. Hãy gọi 115 hoặc "
+        "đến cơ sở y tế gần nhất NGAY, không tự chờ xem có đỡ không. Nếu có người "
+        "bên cạnh, hãy nhờ họ hỗ trợ và đưa bạn đi. Thông tin này chỉ để tham "
+        "khảo, không thay thế việc được bác sĩ khám trực tiếp."
+    ),
+    out_of_scope=False,
+    refusal_reason="",
+    should_see_doctor=True,
+    follow_up_questions=[],
+)
+
+
+def fallback_for(*texts: str) -> ChatAnswer:
+    """Câu thay thế khi phải chặn: có dấu hiệu cấp cứu thì luôn ưu tiên nói
+    'đi cấp cứu' trước mọi thứ khác."""
+    if any(mentions_emergency(t) for t in texts if t):
+        metrics.incr("emergency_fallback")
+        return EMERGENCY_FALLBACK_ANSWER
+    return FALLBACK_ANSWER
+
+
 # Kê đơn: tên thuốc kèm liều lượng. Bắt theo đơn vị thuốc để không dính nhầm
 # các con số của bảo hiểm ("chi trả 500.000đ/ngày").
 _PRESCRIPTION_PATTERNS = [
@@ -51,9 +78,11 @@ _DIAGNOSIS_PATTERNS = [
 # `should_see_doctor` = true, nhưng đó là hành vi của model — trước giờ không có
 # gì kiểm chứng. Danh sách cố ý viết hẹp, bám đúng các dấu hiệu nêu trong prompt.
 _EMERGENCY_PATTERNS = [
-    r"\bdau nguc (du doi|du don)\b",
+    r"\bdau nguc (du doi|du don|lan ra (tay|vai|ham))\b|\bdau that nguc\b",
     r"\bkho tho\b",
     r"\bco giat\b",
+    r"\bmeo mieng\b|\byeu nua nguoi\b|\bliet nua nguoi\b",
+    r"\bmoi tim( tai)?\b|\btim tai\b",
     r"\bmat y thuc\b|\bngat xiu\b|\bhon me\b",
     r"\bchay mau (khong cam|o at)\b",
     r"\btu hai\b|\btu tu\b",
@@ -81,7 +110,9 @@ class ValidationOutcome:
         return ",".join(self.reasons)
 
 
-def validate(answer: ChatAnswer, prompt_version: str | None = None) -> ValidationOutcome:
+def validate(
+    answer: ChatAnswer, prompt_version: str | None = None, question: str = ""
+) -> ValidationOutcome:
     version = prompt_version or settings.prompt_version
     reasons: list[str] = []
     text = answer.answer.strip()
@@ -106,7 +137,9 @@ def validate(answer: ChatAnswer, prompt_version: str | None = None) -> Validatio
         reasons.append("definitive_diagnosis")
 
     if reasons:
-        return ValidationOutcome(ok=False, answer=FALLBACK_ANSWER, reasons=reasons)
+        return ValidationOutcome(
+            ok=False, answer=fallback_for(question, text), reasons=reasons
+        )
 
     # Không fail vì mấy lỗi nhỏ này, chỉ cắt gọn lại cho đúng hợp đồng với FE.
     #
