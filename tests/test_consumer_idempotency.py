@@ -11,6 +11,7 @@ from uuid import uuid4
 import pytest
 from aiokafka import TopicPartition
 
+from app.config import settings
 from app.kafka import consumer
 from app.redis_client import set_redis
 from app.schemas import ChatRequestMessage
@@ -352,9 +353,11 @@ def test_consumer_dat_rebalance_timeout_lon_hon_thoi_gian_cho_message_do():
     assert consumer.REBALANCE_TIMEOUT_MS > consumer.SHUTDOWN_GRACE_SECONDS * 1000
 
 
-def test_openai_client_khong_tu_retry_chong_len_call_with_backoff():
+def test_openai_client_khong_tu_retry_chong_len_call_with_backoff(monkeypatch):
     from app.services import openai_client
 
+    # Không phụ thuộc .env của máy chạy test (CI / checkout sạch không có key)
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test")
     openai_client.start_openai()
     try:
         assert openai_client.get_openai().max_retries == 0

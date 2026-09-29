@@ -15,6 +15,7 @@ from app.kafka.consumer import start_consumer, stop_consumer
 from app.kafka.response_consumer import start_response_consumer, stop_response_consumer
 from app.kafka.producer import publish_chat_request, start_producer, stop_producer
 from app.redis_client import start_redis, stop_redis
+from app.services import cost
 from app.services.openai_client import start_openai, stop_openai
 from app.schemas import ChatRequestMessage
 
@@ -54,6 +55,26 @@ def _check_production_config() -> None:
         )
 
 
+def _check_model_config() -> None:
+    """MODEL_PRICES sai định dạng thì chết lúc khởi động, không phải lúc đang
+    trả lời. Model không có đơn giá riêng thì báo: chi phí trên /metrics sẽ
+    tính theo PRICE_INPUT/OUTPUT_PER_1M chung, không đúng giá model đó."""
+    try:
+        prices = cost.model_prices()
+    except ValueError as exc:
+        raise RuntimeError(
+            'MODEL_PRICES sai định dạng, cần "model=in,out;model2=in,out"'
+        ) from exc
+    models = {settings.openai_model, settings.openai_model_first} - {""}
+    if len(models) > 1:
+        for model in sorted(models - set(prices)):
+            logger.warning(
+                "Model %s không có trong MODEL_PRICES: chi phí ước tính theo "
+                "PRICE_INPUT/OUTPUT_PER_1M, có thể sai.",
+                model,
+            )
+
+
 def _check_auth_config() -> None:
     """Fail-closed: bật auth mà quên đặt secret thì phải chết ngay lúc khởi
     động, chứ không phải chạy ngon lành rồi chấp nhận mọi token."""
@@ -72,6 +93,7 @@ def _check_auth_config() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _check_auth_config()
+    _check_model_config()
     if settings.app_env == "production":
         _check_production_config()
         await verify_production_topics()

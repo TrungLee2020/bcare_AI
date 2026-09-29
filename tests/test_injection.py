@@ -1,6 +1,6 @@
 import pytest
 
-from app.prompts import load_system_prompt
+from app.prompts import leaks_system_prompt, load_system_prompt
 from app.schemas import ChatAnswer
 from app.services import input_filter, output_validator
 from tests.injection_corpus import BLOCKED_BY_FILTER, FILTER_MISSES, LEGITIMATE
@@ -156,3 +156,30 @@ def test_ten_benh_trong_cau_hoi_bao_hiem_khong_bi_coi_la_cap_cuu():
     (méo miệng, yếu nửa người) mới là dấu hiệu cấp cứu."""
     assert not output_validator.mentions_emergency("Gói này có chi trả đột quỵ không?")
     assert output_validator.mentions_emergency("Bố tôi đột nhiên méo miệng, yếu nửa người")
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        # Nguyên văn câu trả lời thật của gpt-5.6-luna từng bị chặn nhầm
+        "Nếu khó thở hoặc đau ngực dữ dội, hãy gọi 115 hoặc đến cơ sở y tế gần nhất ngay.",
+        "Mức chi trả tuỳ gói, bạn nên xem Bảng quyền lợi / Quy tắc bảo hiểm của mình "
+        "hoặc gọi tổng đài bCare để biết chính xác.",
+    ],
+)
+def test_cau_prompt_yeu_cau_model_noi_khong_bi_coi_la_lo_prompt(answer):
+    assert not leaks_system_prompt(answer, "v4")
+
+
+def test_chep_nguyen_prompt_v4_van_bi_chan():
+    assert leaks_system_prompt(load_system_prompt("v4")[:500], "v4")
+
+
+def test_viet_tiep_sau_cau_duoc_phep_khong_bi_coi_la_lo_prompt():
+    """Shingle vắt qua ranh giới câu được phép ("...bác sĩ, không...") trùng với
+    chữ đầu dòng kế tiếp của prompt v4 ("Không khuyên ngừng...")."""
+    answer = (
+        "Nếu cần dùng thuốc hạ sốt, hãy dùng theo hướng dẫn trên bao bì, dược sĩ "
+        "hoặc bác sĩ, không tự ý tăng liều."
+    )
+    assert not leaks_system_prompt(answer, "v4")

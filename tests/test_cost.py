@@ -81,3 +81,15 @@ async def test_metrics_cong_don_chi_phi():
     assert snap["openai_calls"] == 3
     assert snap["tokens_total"] == 3000
     assert snap["cost_usd"] > 0
+
+
+def test_chi_phi_tinh_theo_don_gia_cua_dung_model(monkeypatch):
+    monkeypatch.setattr(settings, "model_prices", "model-manh=2,8; model-nho=0.05,0.4")
+    monkeypatch.setattr(settings, "price_input_per_1m", 0.15)
+    monkeypatch.setattr(settings, "price_output_per_1m", 0.60)
+    usage = Usage(prompt_tokens=1_000_000, completion_tokens=1_000_000)
+    assert estimate_cost(usage, "model-manh") == 10
+    assert round(estimate_cost(usage, "model-nho"), 6) == 0.45
+    # Model không có trong bảng -> đơn giá chung
+    assert round(estimate_cost(usage, "khac"), 6) == 0.75
+    assert round(estimate_cost(usage), 6) == 0.75
