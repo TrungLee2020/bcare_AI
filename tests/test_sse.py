@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import timedelta
 from uuid import uuid4
 
 import pytest
@@ -9,6 +10,8 @@ from app.redis_client import set_redis
 from app.schemas import ChatResponseMessage
 from app.sse import hub, replay
 from app.sse.stream import event_stream, format_event, stream
+
+OPENING = 1  # khung đầu tiên luôn là retry + ping
 from tests.fake_openai import make_answer
 
 
@@ -69,9 +72,22 @@ async def test_replay_tra_ve_dung_phan_sau_moc(redis):
     assert [m.request_id for m in missed] == [second.request_id, third.request_id]
 
 
-async def test_khong_gui_last_request_id_thi_khong_phat_lai(redis):
-    await replay.remember(redis, response())
+async def test_ket_noi_moi_khong_phat_lai_cau_tra_loi_cu(redis):
+    """Mở trang không được nhận lại cả lịch sử."""
+    old = response()
+    old.created_at -= timedelta(seconds=settings.sse_replay_on_connect_seconds + 5)
+    await replay.remember(redis, old)
     assert await replay.missed_since(redis, 1, None) == []
+
+
+async def test_ket_noi_moi_van_nhan_cau_tra_loi_vua_toi_truoc_khi_ket_noi(redis):
+    """Câu bị chặn ở lớp input trả về trong vài ms, có thể tới TRƯỚC khi SSE
+    kịp mở. Không phát lại thì câu trả lời đó không bao giờ tới client."""
+    fresh = response()
+    await replay.remember(redis, fresh)
+    assert [m.request_id for m in await replay.missed_since(redis, 1, None)] == [
+        fresh.request_id
+    ]
 
 
 async def test_last_request_id_la_moi_nhat_thi_khong_co_gi_de_phat_lai(redis):
@@ -154,9 +170,9 @@ async def test_reconnect_nhan_lai_cau_tra_loi_da_lo(redis):
     finally:
         set_redis(None)
 
-    assert len(frames) == 1
-    assert "câu trả lời bị lỡ" in frames[0]
-    assert frames[0].startswith(f"id: {missed.request_id}")
+    assert len(frames) == OPENING + 1
+    assert "câu trả lời bị lỡ" in frames[-1]
+    assert frames[-1].startswith(f"id: {missed.request_id}")
 
 
 async def test_khong_co_gi_de_phat_lai_thi_khong_gui_khung_nao(redis):
@@ -165,13 +181,15 @@ async def test_khong_co_gi_de_phat_lai_thi_khong_gui_khung_nao(redis):
         frames = [f async for f in event_stream(StubRequest(0), 1, None)]
     finally:
         set_redis(None)
-    assert frames == []
+    assert len(frames) == OPENING
+    assert frames[0].startswith("retry: ") and "event: ping" in frames[0]
 
 
 async def test_nhan_duoc_event_phat_ra_khi_dang_ket_noi(redis):
     set_redis(redis)
     gen = event_stream(StubRequest(disconnect_after=5), 1, None)
     try:
+        await gen.__anext__()  # khung mở đầu
         task = asyncio.create_task(gen.__anext__())
         for _ in range(100):  # đợi generator kịp subscribe
             if hub.connection_count(1):
@@ -194,18 +212,20 @@ async def test_gui_keepalive_khi_khong_co_event(redis, monkeypatch):
     set_redis(redis)
     gen = event_stream(StubRequest(disconnect_after=5), 1, None)
     try:
+        await gen.__anext__()  # khung mở đầu
         frame = await asyncio.wait_for(gen.__anext__(), timeout=2)
     finally:
         await gen.aclose()
         set_redis(None)
 
-    assert frame == ": keepalive\n\n"
+    assert frame.startswith("event: ping\ndata: ")
 
 
 async def test_dong_ket_noi_thi_don_sach_subscriber(redis):
     set_redis(redis)
     gen = event_stream(StubRequest(disconnect_after=5), 42, None)
     try:
+        await gen.__anext__()  # khung mở đầu
         task = asyncio.create_task(gen.__anext__())
         for _ in range(100):
             if hub.connection_count(42):
@@ -228,8 +248,71 @@ async def test_response_co_header_chong_buffer_cua_nginx():
     from app.auth import Principal
 
     result = await stream(
-        StubRequest(0), last_request_id=None, principal=Principal(user_id=1, tier="free")
+        StubRequest(0),
+        last_request_id=None,
+        last_event_id=None,
+        principal=Principal(user_id=1, tier="free"),
     )
     assert result.media_type == "text/event-stream"
     assert result.headers["x-accel-buffering"] == "no"
     assert result.headers["cache-control"] == "no-cache"
+
+
+def test_event_dang_xu_ly_khong_co_id():
+    """Có `id:` thì client rớt mạng ngay sau event này sẽ reconnect với mốc
+    không có trong bộ đệm replay, và nhận lại toàn bộ bộ đệm."""
+    frame = format_event(response(status="processing"))
+    assert "id:" not in frame
+    assert frame.startswith("event: processing\n")
+
+
+async def test_header_last_event_id_uu_tien_hon_query_param(redis):
+    """EventSource tự nối lại thì gửi header Last-Event-ID mới nhất nhưng giữ
+    URL cũ — query param lúc đó là mốc của lần mở đầu tiên."""
+    from app.auth import Principal
+
+    set_redis(redis)
+    try:
+        first, second, third = response(), response(), response(text="chỉ cái này")
+        for r in (first, second, third):
+            await replay.remember(redis, r)
+        result = await stream(
+            StubRequest(0),
+            last_request_id=first.request_id,
+            last_event_id=second.request_id,
+            principal=Principal(user_id=1, tier="free"),
+        )
+        frames = [f async for f in result.body_iterator]
+    finally:
+        set_redis(None)
+
+    assert len(frames) == OPENING + 1
+    assert "chỉ cái này" in frames[-1]
+
+
+async def test_dong_ket_noi_khi_qua_thoi_gian_song_toi_da(redis, monkeypatch):
+    """Kết nối mở bằng token sắp hết hạn không được nghe tiếp mãi: đóng để
+    EventSource nối lại và token được kiểm lại."""
+    monkeypatch.setattr(settings, "sse_max_connection_seconds", 0)
+    set_redis(redis)
+    try:
+        frames = [f async for f in event_stream(StubRequest(disconnect_after=1000), 1, None)]
+    finally:
+        set_redis(None)
+    assert len(frames) == OPENING
+    assert hub.connection_count(1) == 0
+
+
+async def test_qua_nhieu_ket_noi_sse_cua_mot_user_bi_tu_choi(monkeypatch):
+    from fastapi import HTTPException
+
+    from app.auth import Principal
+
+    monkeypatch.setattr(settings, "sse_max_connections_per_user", 2)
+    hub.subscribe(1), hub.subscribe(1)
+    with pytest.raises(HTTPException) as exc:
+        await stream(
+            StubRequest(0), last_request_id=None, last_event_id=None,
+            principal=Principal(user_id=1, tier="free"),
+        )
+    assert exc.value.status_code == 429

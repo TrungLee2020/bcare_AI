@@ -17,10 +17,6 @@ def _response_key(request_id: UUID | str) -> str:
     return f"resp:{request_id}"
 
 
-def _processed_key(request_id: UUID | str) -> str:
-    return f"processed:{request_id}"
-
-
 async def claim(redis: Redis, request_id: UUID | str) -> bool:
     """
     Giữ chỗ cho request_id ở tầng API. Trả về True nếu đây là lần đầu thấy
@@ -58,26 +54,3 @@ async def save_response(redis: Redis, request_id: UUID | str, payload: dict[str,
         json.dumps(payload, ensure_ascii=False),
         ex=settings.dedup_ttl_seconds,
     )
-
-
-async def mark_processing(redis: Redis, request_id: UUID | str) -> bool:
-    """
-    Guard ở tầng consumer, tách biệt với claim() ở tầng API.
-
-    Vì consumer commit offset sau khi xử lý (enable_auto_commit=False), Kafka
-    có thể giao lại đúng message đó sau khi consumer crash. Không có guard này
-    thì message được xử lý 2 lần -> gọi OpenAI 2 lần (tốn tiền) ở Phase 3.
-    Trả về True nếu đây là lần đầu consumer xử lý message này.
-    """
-    created = await redis.set(
-        _processed_key(request_id),
-        STATUS_PENDING,
-        nx=True,
-        ex=settings.dedup_ttl_seconds,
-    )
-    return bool(created)
-
-
-async def unmark_processing(redis: Redis, request_id: UUID | str) -> None:
-    """Nhả guard khi consumer xử lý lỗi, để message được retry lại lần sau."""
-    await redis.delete(_processed_key(request_id))

@@ -1,5 +1,7 @@
 # Phase 3 — Prompt Engineering & OpenAI Integration
 
+> Phần prompt đã được rà lại ở [phase7](phase7-prompt-hardening.md): ranh giới khối dữ liệu, xử lý câu trả lời bị cắt cụt, trần độ dài ngữ cảnh. Bản mô tả dưới đây giữ nguyên trạng thái lúc kết thúc phase.
+
 Consumer giờ đã gọi OpenAI thật và publish câu trả lời sang `chat_responses`.
 
 ## 4 lớp, không lớp nào tự nó đủ

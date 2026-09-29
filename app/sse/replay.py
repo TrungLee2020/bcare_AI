@@ -6,8 +6,8 @@ câu trả lời phát ra trong lúc client offline sẽ mất hẳn: message Ka
 consume và commit, không ai phát lại nữa.
 """
 
-import json
 import logging
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from redis.asyncio import Redis
@@ -41,6 +41,8 @@ async def missed_since(
 ) -> list[ChatResponseMessage]:
     """
     Các response phát ra SAU `last_request_id`, theo thứ tự cũ -> mới.
+    Không có `last_request_id` (kết nối mới): các response của
+    `sse_replay_on_connect_seconds` giây gần nhất.
 
     Không tìm thấy `last_request_id` trong bộ đệm (client offline quá lâu, hoặc
     id lạ) thì trả về TOÀN BỘ bộ đệm: thà gửi thừa còn hơn để mất câu trả lời.
@@ -49,7 +51,13 @@ async def missed_since(
     raw = await redis.lrange(_key(user_id), 0, -1)  # mới -> cũ
     items = [ChatResponseMessage.model_validate_json(r) for r in reversed(raw)]
     if last_request_id is None:
-        return []
+        # Kết nối mới: chỉ phát lại phần vừa phát trong vài giây gần đây — đủ
+        # để câu trả lời tới trước khi SSE kịp mở không bị mất, mà không phát
+        # lại cả lịch sử mỗi lần mở trang.
+        since = datetime.now(timezone.utc) - timedelta(
+            seconds=settings.sse_replay_on_connect_seconds
+        )
+        return [item for item in items if item.created_at >= since]
 
     wanted = str(last_request_id)
     for index, item in enumerate(items):

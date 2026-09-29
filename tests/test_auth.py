@@ -115,3 +115,10 @@ def test_mac_dinh_phai_bat_auth():
     from app.config import Settings
 
     assert Settings(_env_file=None).auth_required is True
+
+
+def test_chu_ky_co_ky_tu_non_ascii_bi_tu_choi_chu_khong_nem_typeerror():
+    """compare_digest(str, str) ném TypeError với non-ASCII: thành 500 thay vì 401."""
+    payload = issue_token(1, "free").split(".", 1)[0]
+    with pytest.raises(AuthError):
+        verify_token(f"{payload}.é")

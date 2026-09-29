@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -7,7 +9,18 @@ class Settings(BaseSettings):
     Các biến OpenAI sẽ được thêm ở Phase 3.
     """
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # extra="ignore": `.env` dùng chung với docker-compose (POSTGRES_PASSWORD,
+    # APP_PORT...). Mặc định của pydantic-settings là cấm biến lạ trong file
+    # .env, nên chỉ cần thêm một biến cho compose là app, pytest và mọi script
+    # chạy ngoài Docker đều không khởi động được.
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
+
+    # "production" bật các kiểm tra fail-closed lúc khởi động (app/main.py):
+    # thiếu secret, còn bật endpoint test, topic Kafka ít bản sao... thì từ
+    # chối chạy thay vì chạy "tạm" với cấu hình của môi trường test.
+    app_env: Literal["dev", "production"] = "dev"
 
     # Kafka
     kafka_bootstrap_servers: str = "localhost:9092"
@@ -15,9 +28,30 @@ class Settings(BaseSettings):
     kafka_topic_chat_responses: str = "chat_responses"
     kafka_consumer_group: str = "bcare-ai-answering"
 
-    # Số partition mặc định khi tool test tự tạo topic (chỉ dùng cho môi trường dev/local)
-    kafka_num_partitions: int = 6
+    # Số partition khi tạo topic (scripts/create_topics.py). Là TRẦN số message
+    # xử lý song song của cả hệ thống: mỗi partition một worker tuần tự (để giữ
+    # thứ tự theo user). Tăng số partition của topic đang chạy sẽ đổi user nào
+    # rơi vào partition nào — chỉ làm khi topic đang trống.
+    kafka_num_partitions: int = 24
+    # Production: 3 (kèm min.insync.replicas=2). 1 chỉ dành cho local.
     kafka_replication_factor: int = 1
+    kafka_min_insync_replicas: int = 1
+    # Số bản sao tối thiểu mà APP_ENV=production đòi ở topic có sẵn. Hạ xuống 1
+    # chỉ khi CỐ Ý chạy production trên cụm 1 broker (vd docker-compose.yml):
+    # chấp nhận mất câu hỏi khi broker chết, nhưng KHÔNG phải tắt luôn các
+    # kiểm tra bảo mật như khi để APP_ENV=dev.
+    kafka_production_min_replication: int = 3
+    # Số câu trả lời một instance xử lý CÙNG LÚC (qua mọi partition nó giữ).
+    # Chặn trên bởi rate limit OpenAI của tài khoản (RPM/TPM) chia cho số
+    # instance, và bởi DB_POOL_SIZE + DB_MAX_OVERFLOW.
+    max_concurrent_answers: int = 16
+    # Partition dồn quá ngần này message chưa xử lý thì tạm ngừng đọc nó.
+    kafka_max_buffered_per_partition: int = 50
+    # Câu hỏi nằm trong topic lâu hơn ngần này thì bỏ qua, không gọi OpenAI:
+    # người hỏi đã thôi chờ từ lâu. Chặn luôn trường hợp consumer group mới
+    # (auto_offset_reset=earliest) đọc lại dữ liệu test cũ còn trong topic, và
+    # trường hợp consumer ngừng lâu rồi chạy lại trả lời cả đống câu hỏi cũ.
+    request_max_age_seconds: int = 600
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"
@@ -39,7 +73,12 @@ class Settings(BaseSettings):
     # SLA trả lời đã chốt ở Phase 0; timeout phải nhỏ hơn timeout của SSE để
     # client nhận được thông báo lỗi thay vì treo.
     openai_timeout_seconds: float = 25.0
-    openai_max_output_tokens: int = 800
+    # Phải đủ chỗ cho cả `answer` (~1500 ký tự tiếng Việt ≈ 600 token) lẫn
+    # `follow_up_questions` và phần khung JSON. Cắt cụt giữa chừng thì JSON
+    # hỏng -> parse lỗi -> tốn tiền API mà user không nhận được gì, nên để dư
+    # hơn là để vừa khít: chỉ token SINH RA mới bị tính tiền, trần cao không
+    # làm đắt thêm câu trả lời ngắn.
+    openai_max_output_tokens: int = 1000
     # Nhiệt độ thấp: đây là nội dung sức khoẻ/bảo hiểm, cần ổn định và bám sát
     # hướng dẫn hơn là sáng tạo.
     openai_temperature: float = 0.2
@@ -52,23 +91,36 @@ class Settings(BaseSettings):
 
     # Prompt version đang chạy (file prompts/system_<version>.md).
     # Đổi prompt = đổi biến này, không cần sửa code.
-    prompt_version: str = "v2"
+    prompt_version: str = "v4"
     # Chặn câu trả lời dài bất thường (dấu hiệu model lan man hoặc bị dẫn dắt)
     answer_max_chars: int = 2000
 
     # Postgres (lịch sử chat)
     database_url: str = "postgresql+asyncpg://bcare:bcare@localhost:5432/bcare"
-    db_pool_size: int = 5
+    # Phải đủ cho MAX_CONCURRENT_ANSWERS câu xử lý cùng lúc.
+    db_pool_size: int = 10
     db_max_overflow: int = 10
 
     # Ngữ cảnh hội thoại: số message gần nhất chở nguyên văn vào prompt
     # (10 message = 5 lượt hỏi-đáp). Tăng số này là tăng thẳng chi phí mỗi
     # câu hỏi, nên đổi thì phải đo lại chi phí.
     history_window_messages: int = 10
+    # Trần độ dài MỖI message cũ khi chở lại vào prompt. Không có trần thì
+    # 10 message × 2000 ký tự (giới hạn của ChatAskRequest) được chở lại ở MỌI
+    # câu hỏi sau trong phiên — user tự bơm chi phí lên vài lần chỉ bằng cách
+    # gửi câu hỏi thật dài. Phần bị cắt vẫn còn nguyên trong DB và trong summary.
+    history_message_max_chars: int = 600
+    # Trần độ dài transcript gửi đi tóm tắt, vì lý do y hệt.
+    summary_transcript_max_chars: int = 8000
     # Tóm tắt khi số message chưa tóm tắt vượt ngưỡng này
     summary_trigger_messages: int = 20
-    summary_prompt_version: str = "v1"
+    summary_prompt_version: str = "v3"
     summary_max_chars: int = 1500
+    # Tóm tắt thất bại (lỗi API, bị cắt cụt, summary không qua kiểm tra an
+    # toàn) thì chờ thêm ngần này message mới thử lại. Không có khoảng chờ thì
+    # một phiên có summary luôn bị từ chối (vd người dùng từng thử injection và
+    # model cứ chép lại) sẽ tốn thêm một lần gọi tóm tắt ở MỌI lượt hỏi sau.
+    summary_retry_after_messages: int = 6
 
     # Retry khi gọi OpenAI lỗi tạm thời (rate limit, timeout, 5xx)
     openai_max_attempts: int = 3
@@ -87,6 +139,19 @@ class Settings(BaseSettings):
     # Số response gần nhất giữ lại cho mỗi user để replay khi client reconnect
     sse_replay_buffer_size: int = 20
     sse_replay_ttl_seconds: int = 3600
+    # Kết nối MỚI (không kèm mốc) vẫn được phát lại câu trả lời phát ra trong
+    # ngần này giây gần nhất. Không có nó thì câu trả lời tới NHANH HƠN lúc SSE
+    # kịp mở (vd câu bị chặn ở lớp input: vài ms) sẽ không bao giờ tới client.
+    # Để ngắn: mở lại trang trong khoảng này sẽ nhận lại câu trả lời vừa rồi
+    # (cùng id, client bỏ qua được).
+    sse_replay_on_connect_seconds: int = 10
+    # Trần số kết nối SSE đang mở của MỘT user trên một instance (nhiều tab).
+    # Không có trần thì một token mở được vô hạn kết nối, mỗi cái một hàng đợi.
+    sse_max_connections_per_user: int = 5
+    # Kết nối sống quá ngần này thì server chủ động đóng; EventSource tự nối
+    # lại (kèm Last-Event-ID) và token được kiểm lại từ đầu — không thì một
+    # kết nối mở bằng token sắp hết hạn vẫn nghe tiếp mãi mãi.
+    sse_max_connection_seconds: int = 1800
 
     # Xác thực (Phase 6). Mặc định BẬT: user_id/tier lấy từ token đã ký, không
     # phải từ body do client gửi.
@@ -109,6 +174,10 @@ class Settings(BaseSettings):
     # Bật /test/enqueue (bypass quota, chỉ để verify pipeline Phase 1).
     # Mặc định TẮT — endpoint này bỏ qua quota nên không được bật ở production.
     enable_test_endpoints: bool = False
+
+    # Bearer token để đọc /metrics (số liệu chi phí, lưu lượng). Trống = không
+    # cần token (chỉ dành cho dev); production bắt buộc đặt.
+    metrics_token: str = ""
 
     def quota_limit_for_tier(self, tier: str) -> int:
         return {

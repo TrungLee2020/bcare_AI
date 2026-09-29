@@ -1,0 +1,146 @@
+name: bcare-ai
+
+# Chỉ service `app` được publish port. Postgres, Redis, Kafka chỉ nói chuyện
+# trong network nội bộ của compose: port Docker publish đi thẳng qua iptables,
+# VƯỢT QUA UFW/firewalld, nên "firewall đã chặn" không bảo vệ được chúng.
+# Cần truy cập từ máy dev (chạy app ngoài Docker): dùng docker-compose.dev.yml,
+# chỉ bind 127.0.0.1.
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      # REDIS_PASSWORD/POSTGRES_PASSWORD nằm trong URL: chỉ dùng ký tự an toàn
+      # cho URL (vd `openssl rand -hex 32`).
+      REDIS_URL: redis://:${REDIS_PASSWORD:?Đặt REDIS_PASSWORD trong .env}@redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-bcare}:${POSTGRES_PASSWORD:?Đặt POSTGRES_PASSWORD trong .env}@postgres:5432/${POSTGRES_DB:-bcare}
+    ports:
+      # Mặc định chỉ bind 127.0.0.1: hệ thống ngoài nên vào qua reverse proxy
+      # có TLS (nginx/LB) trên cùng host. Đặt APP_BIND=0.0.0.0 chỉ khi đã có
+      # lớp TLS khác phía trước.
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-8000}:8000"
+    depends_on:
+      postgres-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    # Lớn hơn --timeout-graceful-shutdown của uvicorn (Dockerfile) cộng
+    # SHUTDOWN_GRACE_SECONDS của consumer, để message đang dở kịp chạy xong
+    # và consumer kịp rời group trước khi bị SIGKILL.
+    stop_grace_period: 120s
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-bcare}
+      POSTGRES_USER: ${POSTGRES_USER:-bcare}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Đặt POSTGRES_PASSWORD trong .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  postgres-init:
+    image: postgres:16-alpine
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Đặt POSTGRES_PASSWORD trong .env}
+    volumes:
+      - ./db/schema.sql:/schema.sql:ro
+    command:
+      - psql
+      - --host=postgres
+      - --username=${POSTGRES_USER:-bcare}
+      - --dbname=${POSTGRES_DB:-bcare}
+      - --set=ON_ERROR_STOP=1
+      - --file=/schema.sql
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  redis:
+    image: redis:7-alpine
+    environment:
+      # redis-cli của healthcheck đọc mật khẩu từ biến này
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?Đặt REDIS_PASSWORD trong .env}
+    volumes:
+      - redis-data:/data
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - ${REDIS_PASSWORD:?Đặt REDIS_PASSWORD trong .env}
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  kafka:
+    image: apache/kafka:3.9.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      # Chỉ có listener nội bộ, không xác thực -> tuyệt đối không publish port
+      # này ra host. Ai produce được vào chat_requests là bỏ qua được toàn bộ
+      # auth/quota; ai consume được chat_responses là đọc được mọi câu trả lời.
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_LISTENERS: INTERNAL://:29092,CONTROLLER://:29093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: ${KAFKA_NUM_PARTITIONS:-6}
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  kafka-init:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # Không dùng env_file: script tạo topic không cần OPENAI_API_KEY hay
+    # AUTH_SECRET, không có lý do gì để đưa secret vào container này.
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TOPIC_CHAT_REQUESTS: ${KAFKA_TOPIC_CHAT_REQUESTS:-chat_requests}
+      KAFKA_TOPIC_CHAT_RESPONSES: ${KAFKA_TOPIC_CHAT_RESPONSES:-chat_responses}
+      KAFKA_TOPIC_DEAD_LETTER: ${KAFKA_TOPIC_DEAD_LETTER:-chat_requests_dlq}
+      KAFKA_NUM_PARTITIONS: ${KAFKA_NUM_PARTITIONS:-24}
+      # Cụm 1 broker của compose này chỉ chứa được 1 bản sao.
+      KAFKA_REPLICATION_FACTOR: 1
+      KAFKA_MIN_INSYNC_REPLICAS: 1
+    command: ["python", "-m", "scripts.create_topics"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  postgres-data:
+  redis-data:
+  kafka-data:

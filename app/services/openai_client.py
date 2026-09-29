@@ -5,7 +5,7 @@ from openai import AsyncOpenAI
 
 from app.config import settings
 from app.db.repository import ConversationContext
-from app.prompts import load_prompt, load_system_prompt
+from app.prompts import clip, fence, load_prompt, load_system_prompt
 from app.schemas import ChatAnswer, SessionSummary
 from app.services.cost import Usage, from_completion
 from app.services.retry import call_with_backoff
@@ -20,13 +20,32 @@ class Generation:
     answer: ChatAnswer
     usage: Usage
 
+
+class TruncatedCompletion(Exception):
+    """
+    Model bị cắt giữa chừng vì chạm trần `max_tokens`.
+
+    Tách thành lỗi riêng thay vì để pydantic ném ValidationError khi parse
+    JSON dở: hai nguyên nhân này cần hai cách xử lý khác hẳn nhau. JSON sai
+    schema là model trả sai; cắt cụt là TRẦN của mình đặt thấp quá, và retry
+    nguyên xi thì lần nào cũng cắt đúng chỗ đó. Ghi rõ ra DLQ để còn biết mà
+    nâng `openai_max_output_tokens`.
+    """
+
+
 _client: AsyncOpenAI | None = None
 
 
 def start_openai() -> None:
     global _client
+    # max_retries=0: SDK mặc định tự retry 2 lần, chồng lên `call_with_backoff`
+    # (app/services/retry.py) thành tới 9 lần thử × timeout cho một câu — vượt
+    # xa SHUTDOWN_GRACE_SECONDS và chặn cả partition. Chỉ một nơi quyết định
+    # retry.
     _client = AsyncOpenAI(
-        api_key=settings.openai_api_key, timeout=settings.openai_timeout_seconds
+        api_key=settings.openai_api_key,
+        timeout=settings.openai_timeout_seconds,
+        max_retries=0,
     )
     logger.info("OpenAI client sẵn sàng (model=%s)", settings.openai_model)
 
@@ -92,8 +111,19 @@ def _response_format(name: str = "chat_answer", model=None) -> dict:
     }
 
 
-def _as_question(content: str) -> str:
-    return f"<user_question>\n{content}\n</user_question>"
+def _as_question(content: str, max_chars: int | None = None) -> str:
+    return fence("user_question", content, max_chars)
+
+
+def _parse(completion, model):
+    """Đọc nội dung completion ra schema, phân biệt rõ 'bị cắt' với 'trả sai'."""
+    choice = completion.choices[0]
+    if getattr(choice, "finish_reason", None) == "length":
+        raise TruncatedCompletion(
+            f"Model chạm trần {settings.openai_max_output_tokens} token đầu ra, "
+            f"JSON trả về không hoàn chỉnh"
+        )
+    return model.model_validate_json(choice.message.content or "")
 
 
 def build_messages(
@@ -111,6 +141,11 @@ def build_messages(
     nếu nhét vào system turn thì một câu injection trong lịch sử có thể được
     "rửa" qua bước tóm tắt để leo lên thành chỉ dẫn hệ thống. Vì vậy summary
     luôn đi ở user turn, trong khối <session_summary>.
+
+    Mọi khối dữ liệu đều dựng qua `fence()` chứ không nối chuỗi tay: nối tay
+    thì người dùng chỉ cần gõ `</user_question>` là phần viết sau đó nằm NGOÀI
+    khối, tức là đúng chỗ model đọc như chỉ dẫn. Ranh giới chỉ dẫn/dữ liệu chỉ
+    có giá trị khi dữ liệu không tự đóng được khối của nó.
     """
     messages: list[dict] = [
         {"role": "system", "content": load_system_prompt(prompt_version)}
@@ -121,14 +156,27 @@ def build_messages(
             messages.append(
                 {
                     "role": "user",
-                    "content": f"<session_summary>\n{context.summary}\n</session_summary>",
+                    "content": fence(
+                        "session_summary",
+                        context.summary,
+                        settings.summary_max_chars,
+                    ),
                 }
             )
+        limit = settings.history_message_max_chars
         for past in context.recent:
+            if not past.content or not past.content.strip():
+                # Lượt rỗng không thêm ngữ cảnh nào, chỉ tốn token và làm model
+                # phải đoán xem khối trống đó nghĩa là gì.
+                continue
             if past.role == "user":
-                messages.append({"role": "user", "content": _as_question(past.content)})
+                messages.append(
+                    {"role": "user", "content": _as_question(past.content, limit)}
+                )
             else:
-                messages.append({"role": "assistant", "content": past.content})
+                messages.append(
+                    {"role": "assistant", "content": clip(past.content, limit)}
+                )
 
     messages.append({"role": "user", "content": _as_question(content)})
     return messages
@@ -152,9 +200,8 @@ async def generate(
             **_sampling_params(model),
         )
     )
-    raw = completion.choices[0].message.content or ""
     return Generation(
-        answer=ChatAnswer.model_validate_json(raw), usage=from_completion(completion)
+        answer=_parse(completion, ChatAnswer), usage=from_completion(completion)
     )
 
 
@@ -167,10 +214,17 @@ async def summarize(transcript: str, prompt_version: str | None = None) -> Sessi
             model=settings.openai_model,
             messages=[
                 {"role": "system", "content": load_prompt("summary", version)},
-                {"role": "user", "content": f"<transcript>\n{transcript}\n</transcript>"},
+                {
+                    "role": "user",
+                    # `transcript` do `summarizer.render_transcript` dựng từ các
+                    # khối fence() đã gỡ thẻ và đã chặn độ dài theo từng khối.
+                    # Gỡ thẻ lần nữa ở đây là xoá mất <user>/<assistant>, model
+                    # tóm tắt không còn biết câu nào của ai.
+                    "content": fence("transcript", transcript, sanitize=False),
+                },
             ],
             response_format=_response_format("session_summary", SessionSummary),
             **_sampling_params(settings.openai_model),
         )
     )
-    return SessionSummary.model_validate_json(completion.choices[0].message.content or "")
+    return _parse(completion, SessionSummary)
