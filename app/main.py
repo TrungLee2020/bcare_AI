@@ -90,7 +90,16 @@ async def lifespan(app: FastAPI):
     await stop_redis()
 
 
-app = FastAPI(title="bcare_AI - AI answering service", lifespan=lifespan)
+# Production không public /docs, /redoc, /openapi.json: bản đồ API đầy đủ chỉ
+# giúp người dò tìm, còn hệ thống tích hợp đã có tài liệu riêng.
+_public_docs = settings.app_env != "production"
+app = FastAPI(
+    title="bcare_AI - AI answering service",
+    lifespan=lifespan,
+    docs_url="/docs" if _public_docs else None,
+    redoc_url="/redoc" if _public_docs else None,
+    openapi_url="/openapi.json" if _public_docs else None,
+)
 app.include_router(chat_router)
 app.include_router(sse_router)
 

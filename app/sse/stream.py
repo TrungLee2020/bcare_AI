@@ -15,7 +15,7 @@ import logging
 import time
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
 from app import metrics
@@ -74,14 +74,19 @@ async def event_stream(request: Request, user_id: int, last_request_id: UUID | N
         for missed in await replay.missed_since(get_redis(), user_id, last_request_id):
             yield format_event(missed)
 
+        deadline = time.monotonic() + settings.sse_max_connection_seconds
         while True:
             if await request.is_disconnected():
+                break
+            if time.monotonic() >= deadline:
+                # Đóng chủ động; EventSource nối lại sau RECONNECT_MS kèm
+                # Last-Event-ID nên không lỡ event nào, và token được kiểm lại.
                 break
             try:
                 response = await asyncio.wait_for(
                     queue.get(), timeout=settings.sse_heartbeat_seconds
                 )
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 # Proxy/LB thường đóng kết nối idle sau 30-60s.
                 yield ping_event()
                 continue
@@ -106,6 +111,11 @@ async def stream(
     giữ nguyên URL cũ — tức `last_request_id` trên URL là mốc của lần mở ĐẦU
     TIÊN, đã cũ.
     """
+    if hub.connection_count(principal.user_id) >= settings.sse_max_connections_per_user:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Quá nhiều kết nối SSE đang mở",
+        )
     metrics.incr("sse_connections")
     return StreamingResponse(
         event_stream(request, principal.user_id, last_event_id or last_request_id),

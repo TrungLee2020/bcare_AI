@@ -9,7 +9,12 @@ class Settings(BaseSettings):
     Các biến OpenAI sẽ được thêm ở Phase 3.
     """
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # extra="ignore": .env dùng chung với docker-compose.yml, có các biến chỉ
+    # compose đọc (POSTGRES_PASSWORD, REDIS_PASSWORD, APP_BIND...). Mặc định
+    # của pydantic-settings là cấm biến lạ trong .env -> app chết lúc import.
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     # "production" bật các kiểm tra fail-closed lúc khởi động (app/main.py):
     # thiếu secret, còn bật endpoint test, topic Kafka ít bản sao... thì từ
@@ -30,6 +35,11 @@ class Settings(BaseSettings):
     # Production: 3 (kèm min.insync.replicas=2). 1 chỉ dành cho local.
     kafka_replication_factor: int = 1
     kafka_min_insync_replicas: int = 1
+    # Số bản sao tối thiểu mà APP_ENV=production đòi ở topic có sẵn. Hạ xuống 1
+    # chỉ khi CỐ Ý chạy production trên cụm 1 broker (vd docker-compose.yml):
+    # chấp nhận mất câu hỏi khi broker chết, nhưng KHÔNG phải tắt luôn các
+    # kiểm tra bảo mật như khi để APP_ENV=dev.
+    kafka_production_min_replication: int = 3
     # Số câu trả lời một instance xử lý CÙNG LÚC (qua mọi partition nó giữ).
     # Chặn trên bởi rate limit OpenAI của tài khoản (RPM/TPM) chia cho số
     # instance, và bởi DB_POOL_SIZE + DB_MAX_OVERFLOW.
@@ -134,6 +144,13 @@ class Settings(BaseSettings):
     # Để ngắn: mở lại trang trong khoảng này sẽ nhận lại câu trả lời vừa rồi
     # (cùng id, client bỏ qua được).
     sse_replay_on_connect_seconds: int = 10
+    # Trần số kết nối SSE đang mở của MỘT user trên một instance (nhiều tab).
+    # Không có trần thì một token mở được vô hạn kết nối, mỗi cái một hàng đợi.
+    sse_max_connections_per_user: int = 5
+    # Kết nối sống quá ngần này thì server chủ động đóng; EventSource tự nối
+    # lại (kèm Last-Event-ID) và token được kiểm lại từ đầu — không thì một
+    # kết nối mở bằng token sắp hết hạn vẫn nghe tiếp mãi mãi.
+    sse_max_connection_seconds: int = 1800
 
     # Xác thực (Phase 6). Mặc định BẬT: user_id/tier lấy từ token đã ký, không
     # phải từ body do client gửi.

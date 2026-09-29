@@ -316,3 +316,47 @@ async def test_partition_don_viec_thi_tam_ngung_doc(monkeypatch):
         worker.queue.get_nowait()
     workers.apply_backpressure()
     assert tp not in fake.paused
+
+
+async def test_vong_doc_chet_thi_tu_khoi_dong_lai(redis, wired, monkeypatch):
+    """Kafka chưa sẵn sàng lúc boot: trước đây task chết hẳn, API vẫn nhận câu
+    hỏi và trừ quota nhưng không ai trả lời."""
+    published, _ = wired
+    message = question()
+    healthy = FakeKafkaConsumer([record(message, 0)])
+    attempts = {"n": 0}
+
+    class BrokenOnce(FakeKafkaConsumer):
+        async def start(self):
+            raise ConnectionError("Kafka chưa sẵn sàng")
+
+    def factory(*a, **k):
+        attempts["n"] += 1
+        return BrokenOnce([]) if attempts["n"] == 1 else healthy
+
+    monkeypatch.setattr(consumer, "AIOKafkaConsumer", factory)
+    monkeypatch.setattr(consumer, "RESTART_DELAY_SECONDS", 0.01)
+
+    consumer.start_consumer()
+    try:
+        await wait_until(lambda: healthy.commits == 1)
+        assert consumer.is_alive()
+    finally:
+        await consumer.stop_consumer()
+
+    assert attempts["n"] == 2
+    assert [r.request_id for r in published] == [message.request_id]
+
+
+def test_consumer_dat_rebalance_timeout_lon_hon_thoi_gian_cho_message_do():
+    assert consumer.REBALANCE_TIMEOUT_MS > consumer.SHUTDOWN_GRACE_SECONDS * 1000
+
+
+def test_openai_client_khong_tu_retry_chong_len_call_with_backoff():
+    from app.services import openai_client
+
+    openai_client.start_openai()
+    try:
+        assert openai_client.get_openai().max_retries == 0
+    finally:
+        openai_client._client = None

@@ -38,8 +38,14 @@ _client: AsyncOpenAI | None = None
 
 def start_openai() -> None:
     global _client
+    # max_retries=0: SDK mặc định tự retry 2 lần, chồng lên `call_with_backoff`
+    # (app/services/retry.py) thành tới 9 lần thử × timeout cho một câu — vượt
+    # xa SHUTDOWN_GRACE_SECONDS và chặn cả partition. Chỉ một nơi quyết định
+    # retry.
     _client = AsyncOpenAI(
-        api_key=settings.openai_api_key, timeout=settings.openai_timeout_seconds
+        api_key=settings.openai_api_key,
+        timeout=settings.openai_timeout_seconds,
+        max_retries=0,
     )
     logger.info("OpenAI client sẵn sàng (model=%s)", settings.openai_model)
 

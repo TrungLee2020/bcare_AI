@@ -92,7 +92,14 @@ async def verify_production_topics() -> None:
         described = await admin.describe_topics(list(retention_ms()))
     finally:
         await admin.close()
-    problems = layout_problems(described, min_replication=3)
+    min_replication = settings.kafka_production_min_replication
+    if min_replication < 3:
+        logger.warning(
+            "KAFKA_PRODUCTION_MIN_REPLICATION=%d: 1 broker chết là mất câu hỏi "
+            "của user. Chỉ chấp nhận được khi chạy cụm 1 broker có chủ đích.",
+            min_replication,
+        )
+    problems = layout_problems(described, min_replication=min_replication)
     if problems:
         raise RuntimeError(
             "Kafka chưa sẵn sàng cho production: " + "; ".join(problems)
