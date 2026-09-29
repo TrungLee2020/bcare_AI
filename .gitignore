@@ -5,3 +5,5 @@ venv/
 .env
 dev_chat.db
 .env.dev
+*.pem
+*.ppk
