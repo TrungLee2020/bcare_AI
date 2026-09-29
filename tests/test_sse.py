@@ -288,3 +288,31 @@ async def test_header_last_event_id_uu_tien_hon_query_param(redis):
 
     assert len(frames) == OPENING + 1
     assert "chỉ cái này" in frames[-1]
+
+
+async def test_dong_ket_noi_khi_qua_thoi_gian_song_toi_da(redis, monkeypatch):
+    """Kết nối mở bằng token sắp hết hạn không được nghe tiếp mãi: đóng để
+    EventSource nối lại và token được kiểm lại."""
+    monkeypatch.setattr(settings, "sse_max_connection_seconds", 0)
+    set_redis(redis)
+    try:
+        frames = [f async for f in event_stream(StubRequest(disconnect_after=1000), 1, None)]
+    finally:
+        set_redis(None)
+    assert len(frames) == OPENING
+    assert hub.connection_count(1) == 0
+
+
+async def test_qua_nhieu_ket_noi_sse_cua_mot_user_bi_tu_choi(monkeypatch):
+    from fastapi import HTTPException
+
+    from app.auth import Principal
+
+    monkeypatch.setattr(settings, "sse_max_connections_per_user", 2)
+    hub.subscribe(1), hub.subscribe(1)
+    with pytest.raises(HTTPException) as exc:
+        await stream(
+            StubRequest(0), last_request_id=None, last_event_id=None,
+            principal=Principal(user_id=1, tier="free"),
+        )
+    assert exc.value.status_code == 429

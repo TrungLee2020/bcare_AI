@@ -271,6 +271,10 @@ async def _process_with_retry(record) -> None:
 # thời gian xử lý tối đa của 1 message (timeout OpenAI × số lần thử + backoff),
 # và nhỏ hơn terminationGracePeriodSeconds của k8s.
 SHUTDOWN_GRACE_SECONDS = 90.0
+# Phải lớn hơn SHUTDOWN_GRACE_SECONDS, xem chỗ dùng trong `_consume_loop`.
+REBALANCE_TIMEOUT_MS = int((SHUTDOWN_GRACE_SECONDS + 30) * 1000)
+# Vòng đọc lỗi (Kafka chưa sẵn sàng lúc boot, mất kết nối...) thì thử lại sau
+RESTART_DELAY_SECONDS = 2.0
 
 
 class _PartitionWorker:
@@ -390,10 +394,20 @@ async def _consume_loop() -> None:
         group_id=settings.kafka_consumer_group,
         enable_auto_commit=False,
         auto_offset_reset="earliest",
+        # Mặc định bằng session_timeout_ms (10s), trong khi on_partitions_revoked
+        # chờ message đang dở tới SHUTDOWN_GRACE_SECONDS. Để mặc định thì broker
+        # loại instance này khỏi group giữa lúc đang chờ, giao partition cho
+        # instance khác, và message đang dở bị xử lý lại: 2 lần gọi OpenAI, 2
+        # câu trả lời khác nhau cho cùng request_id.
+        rebalance_timeout_ms=REBALANCE_TIMEOUT_MS,
     )
     workers = _Workers(consumer, asyncio.Semaphore(settings.max_concurrent_answers))
     consumer.subscribe([settings.kafka_topic_chat_requests], listener=workers)
-    await consumer.start()
+    try:
+        await consumer.start()
+    except Exception:
+        await consumer.stop()
+        raise
     logger.info(
         "Consumer started: topic=%s group=%s concurrency=%d",
         settings.kafka_topic_chat_requests,
@@ -415,10 +429,30 @@ async def _consume_loop() -> None:
         logger.info("Consumer stopped")
 
 
+async def _run_forever() -> None:
+    """Chạy lại `_consume_loop` khi nó chết vì lỗi: consumer chết là API vẫn
+    nhận câu hỏi và trừ quota nhưng không ai trả lời, và `restart:
+    unless-stopped` của Docker không restart container chỉ vì unhealthy.
+    Message chưa commit của lần chạy trước được Kafka giao lại."""
+    while not _stop_event.is_set():
+        try:
+            await _consume_loop()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "Consumer chat_requests lỗi, khởi động lại sau %.0fs", RESTART_DELAY_SECONDS
+            )
+            try:
+                await asyncio.wait_for(_stop_event.wait(), timeout=RESTART_DELAY_SECONDS)
+            except asyncio.TimeoutError:
+                pass
+
+
 def start_consumer() -> None:
     global _consumer_task
     _stop_event.clear()
-    _consumer_task = asyncio.create_task(_consume_loop())
+    _consumer_task = asyncio.create_task(_run_forever())
 
 
 def is_alive() -> bool:
@@ -438,7 +472,7 @@ async def stop_consumer() -> None:
         return
     try:
         await asyncio.wait_for(task, timeout=SHUTDOWN_GRACE_SECONDS + 5)
-    except TimeoutError:
+    except asyncio.TimeoutError:
         logger.warning("Consumer không tắt kịp, huỷ")
     except Exception:
         logger.exception("Consumer kết thúc với lỗi")

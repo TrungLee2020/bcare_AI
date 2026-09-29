@@ -69,7 +69,9 @@ def verify_token(token: str) -> Principal:
 
     # compare_digest chứ không phải ==: so sánh chuỗi thường thoát ra sớm ở byte
     # đầu tiên khác nhau, để lộ thông tin qua thời gian phản hồi.
-    if not hmac.compare_digest(signature, _sign(payload)):
+    # So bytes, không so str: compare_digest(str, str) ném TypeError khi chuỗi
+    # có ký tự non-ASCII, thành 500 thay vì 401.
+    if not hmac.compare_digest(signature.encode(), _sign(payload).encode()):
         raise AuthError("Chữ ký không hợp lệ")
 
     try:
@@ -103,10 +105,13 @@ async def current_principal(
 ) -> Principal:
     if not settings.auth_required:
         # Chế độ dev. Đã cảnh báo to ở lúc khởi động (xem app/main.py).
-        return Principal(
-            user_id=int(request.query_params.get("user_id", 0)),
-            tier=request.query_params.get("tier", "free"),
-        )
+        try:
+            user_id = int(request.query_params.get("user_id", 0))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="user_id phải là số"
+            ) from exc
+        return Principal(user_id=user_id, tier=request.query_params.get("tier", "free"))
 
     raw = _extract_token(request, token)
     if not raw:
