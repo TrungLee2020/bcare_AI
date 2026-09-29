@@ -9,7 +9,13 @@ class Settings(BaseSettings):
     Các biến OpenAI sẽ được thêm ở Phase 3.
     """
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # extra="ignore": `.env` dùng chung với docker-compose (POSTGRES_PASSWORD,
+    # APP_PORT...). Mặc định của pydantic-settings là cấm biến lạ trong file
+    # .env, nên chỉ cần thêm một biến cho compose là app, pytest và mọi script
+    # chạy ngoài Docker đều không khởi động được.
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     # "production" bật các kiểm tra fail-closed lúc khởi động (app/main.py):
     # thiếu secret, còn bật endpoint test, topic Kafka ít bản sao... thì từ
