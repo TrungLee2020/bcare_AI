@@ -72,6 +72,25 @@ async def _with_retry(factory):
     )
 
 
+def _is_reasoning_model(model: str) -> bool:
+    return model.startswith(("gpt-5", "o1", "o3", "o4"))
+
+
+def _sampling_params(model: str) -> dict:
+    """
+    Model reasoning (gpt-5*, o*) không nhận `temperature` khác mặc định và bỏ
+    hẳn `max_tokens`. `max_completion_tokens` của chúng tính cả token suy luận,
+    nên cộng thêm ngân sách suy luận để không bị hết giữa chừng rồi trả về rỗng.
+    """
+    params = {"max_completion_tokens": settings.openai_max_output_tokens}
+    if _is_reasoning_model(model):
+        params["max_completion_tokens"] += settings.openai_reasoning_token_budget
+        params["reasoning_effort"] = settings.openai_reasoning_effort
+    else:
+        params["temperature"] = settings.openai_temperature
+    return params
+
+
 def _response_format(name: str = "chat_answer", model=None) -> dict:
     model = model or ChatAnswer
     return {
@@ -161,17 +180,18 @@ async def generate(
     content: str,
     prompt_version: str | None = None,
     context: ConversationContext | None = None,
+    model: str | None = None,
 ) -> Generation:
     """Gọi OpenAI và parse ra ChatAnswer kèm token usage. Lỗi mạng/API được ném
     lên cho caller xử lý (retry ở tầng dưới, dead-letter ở consumer)."""
     version = prompt_version or settings.prompt_version
+    model = model or settings.openai_model
     completion = await _with_retry(
         lambda: get_openai().chat.completions.create(
-            model=settings.openai_model,
+            model=model,
             messages=build_messages(content, version, context),
             response_format=_response_format(),
-            temperature=settings.openai_temperature,
-            max_tokens=settings.openai_max_output_tokens,
+            **_sampling_params(model),
         )
     )
     return Generation(
@@ -198,8 +218,7 @@ async def summarize(transcript: str, prompt_version: str | None = None) -> Sessi
                 },
             ],
             response_format=_response_format("session_summary", SessionSummary),
-            temperature=settings.openai_temperature,
-            max_tokens=settings.openai_max_output_tokens,
+            **_sampling_params(settings.openai_model),
         )
     )
     return _parse(completion, SessionSummary)

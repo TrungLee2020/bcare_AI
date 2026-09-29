@@ -3,3 +3,7 @@ __pycache__/
 .venv/
 venv/
 .env
+dev_chat.db
+.env.dev
+*.pem
+*.ppk
