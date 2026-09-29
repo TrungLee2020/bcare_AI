@@ -44,7 +44,7 @@ from app.services.openai_client import start_openai, stop_openai
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-# Biến DEV_* để ở .env.dev, không để ở .env: Settings của app cấm biến lạ trong .env
+# Biến DEV_* để ở .env.dev cho gọn, tách khỏi cấu hình thật của app ở .env
 _env = {**dotenv_values(".env.dev"), **os.environ}
 DB_URL = _env.get("DEV_CHAT_DB_URL", "sqlite+aiosqlite:///dev_chat.db")
 HTML = Path(__file__).with_name("dev_chat.html")

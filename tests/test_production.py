@@ -201,3 +201,13 @@ async def test_script_chi_xoa_key_cua_app_trong_redis(redis, monkeypatch):
 
 async def _noop():
     pass
+
+
+def test_bien_la_trong_env_khong_lam_app_chet(tmp_path, monkeypatch):
+    """`.env` dùng chung với docker-compose (POSTGRES_PASSWORD, APP_PORT...):
+    cấm biến lạ là app, pytest và script chạy ngoài Docker đều không lên."""
+    from app.config import Settings
+
+    (tmp_path / ".env").write_text("POSTGRES_PASSWORD=secret\nAPP_PORT=8000\nPROMPT_VERSION=v4\n")
+    monkeypatch.chdir(tmp_path)
+    assert Settings().prompt_version == "v4"
