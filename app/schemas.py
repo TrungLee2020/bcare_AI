@@ -123,7 +123,8 @@ class DeadLetterMessage(BaseModel):
     parse được, nên ép nó về schema lần nữa sẽ mất đúng phần cần điều tra.
     """
 
-    reason: Literal["invalid_schema", "openai_failed"]
+    # processing_failed = lỗi hạ tầng/lỗi code lặp lại quá số lần thử ở consumer
+    reason: Literal["invalid_schema", "openai_failed", "processing_failed"]
     payload: str
     error_type: str = ""
     error_detail: str = ""

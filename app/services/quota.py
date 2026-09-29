@@ -77,9 +77,18 @@ async def consume(redis: Redis, user_id: int, tier: str) -> int:
     return limit - int(used)
 
 
-async def refund(redis: Redis, user_id: int) -> None:
-    """Trả lại 1 lượt đã trừ (dùng khi enqueue Kafka lỗi -> user chưa hỏi được gì)."""
-    await redis.eval(_REFUND_LUA, 1, quota_key(user_id))
+async def refund(redis: Redis, user_id: int, charged_at: datetime | None = None) -> None:
+    """
+    Trả lại 1 lượt đã trừ (dùng khi enqueue Kafka lỗi -> user chưa hỏi được gì).
+
+    `charged_at`: lúc lượt đó bị trừ. Khác ngày (giờ VN) với hôm nay thì KHÔNG
+    hoàn: counter của ngày đó đã hết hạn, trừ vào ngày hôm nay là tặng thêm
+    một lượt cho một câu hỏi của hôm qua.
+    """
+    now = _now()
+    if charged_at is not None and quota_key(user_id, charged_at.astimezone(now.tzinfo)) != quota_key(user_id, now):
+        return
+    await redis.eval(_REFUND_LUA, 1, quota_key(user_id, now))
 
 
 async def remaining(redis: Redis, user_id: int, tier: str) -> int:

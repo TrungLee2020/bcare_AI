@@ -38,16 +38,20 @@ async def ensure_session(db: AsyncSession, session_id: UUID, user_id: int) -> Ch
 
 
 async def load_context(
-    db: AsyncSession, session_id: UUID, limit: int
+    db: AsyncSession, session_id: UUID, user_id: int, limit: int
 ) -> ConversationContext:
     """
     Nạp summary + `limit` message gần nhất CHƯA nằm trong summary.
 
     Lọc theo `summarized_through_id` để không nhồi trùng: phần đã tóm tắt thì
     chở bằng summary, phần chưa tóm tắt mới chở nguyên văn.
+
+    Phiên của user KHÁC thì trả ngữ cảnh rỗng: `session_id` do client gửi lên,
+    không lọc theo chủ phiên là ai có session_id của người khác cũng đọc được
+    lịch sử sức khoẻ của họ (qua câu trả lời của model).
     """
     session = await db.get(ChatSession, session_id)
-    if session is None:
+    if session is None or session.user_id != user_id:
         return ConversationContext()
 
     query = select(ChatMessage).where(ChatMessage.session_id == session_id)
