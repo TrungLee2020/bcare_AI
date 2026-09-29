@@ -77,7 +77,9 @@ async def _handle(message: ChatRequestMessage) -> None:
     slow_notice = asyncio.create_task(_notify_slow(message))
     try:
         context = await history.load_context(message)
-        response = await answering.answer_question(message, context)
+        response = await answering.answer_question(
+            message, context, settings.model_for_question(message.question_no)
+        )
     except Exception as exc:
         # Tới đây là đã retry hết số lần cho phép (xem app/services/retry.py).
         # Hoàn quota (user chưa nhận được câu trả lời nào), đẩy message sang

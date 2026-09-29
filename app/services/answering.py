@@ -82,8 +82,9 @@ async def answer_question(
     generation = await openai_client.generate(
         message.content, version, context, model
     )
-    usage = generation.usage.as_dict()
+    usage = generation.usage.as_dict(model)
     metrics.incr("openai_calls")
+    metrics.incr(f"openai_calls:{model}")
     metrics.incr("tokens_total", generation.usage.total_tokens)
     metrics.incr("cost_usd", usage["cost_usd"])
 

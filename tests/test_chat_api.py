@@ -160,3 +160,29 @@ async def test_khong_doc_duoc_cau_tra_loi_cua_user_khac_qua_request_id(client, p
     resp = await client.post("/chat/ask", json=body(request_id=rid), headers=auth(user_id=200))
     assert resp.status_code == 409
     assert "trầm cảm" not in resp.text
+
+
+async def test_so_thu_tu_cau_hoi_trong_ngay_duoc_gan_vao_message(client, producer):
+    """Chốt ở API lúc trừ quota: consumer dựa vào đây để chọn model mạnh cho
+    câu đầu ngày."""
+    for _ in range(2):
+        resp = await client.post("/chat/ask", json=body(request_id=str(uuid4())), headers=auth(300))
+        assert resp.status_code == 202
+    assert [m.question_no for m in producer.published] == [1, 2]
+
+
+async def test_retry_cung_request_id_khong_doi_so_thu_tu(client, producer):
+    rid = str(uuid4())
+    await client.post("/chat/ask", json=body(request_id=rid), headers=auth(301))
+    await client.post("/chat/ask", json=body(request_id=rid), headers=auth(301))
+    await client.post("/chat/ask", json=body(request_id=str(uuid4())), headers=auth(301))
+    assert [m.question_no for m in producer.published] == [1, 2]
+
+
+async def test_enqueue_loi_thi_lan_hoi_lai_van_la_cau_dau(client, producer):
+    """Lượt bị hoàn quota không được làm user mất lượt dùng model mạnh."""
+    producer.fail = True
+    await client.post("/chat/ask", json=body(), headers=auth(302))
+    producer.fail = False
+    await client.post("/chat/ask", json=body(request_id=str(uuid4())), headers=auth(302))
+    assert [m.question_no for m in producer.published] == [1]

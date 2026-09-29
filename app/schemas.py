@@ -20,6 +20,11 @@ class ChatRequestMessage(BaseModel):
     tier: Literal["free", "premium"]
     content: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    # Câu thứ mấy trong ngày của user, chốt ở API lúc trừ quota (1 = câu đầu,
+    # dùng model mạnh — xem Settings.model_for_question). Tính ở API chứ
+    # không ở consumer: lúc consumer chạy, counter có thể đã tăng vì các câu
+    # gửi sau. None = message cũ, trước khi có trường này.
+    question_no: int | None = None
 
 
 class ChatAskRequest(BaseModel):
@@ -40,13 +45,16 @@ class ChatAskRequest(BaseModel):
     session_id: UUID | None = None
     content: str = Field(min_length=1, max_length=2000)
 
-    def to_message(self, user_id: int, tier: str) -> "ChatRequestMessage":
+    def to_message(
+        self, user_id: int, tier: str, question_no: int | None = None
+    ) -> "ChatRequestMessage":
         return ChatRequestMessage(
             request_id=self.request_id,
             user_id=user_id,
             session_id=self.session_id,
             tier=tier,
             content=self.content,
+            question_no=question_no,
         )
 
 

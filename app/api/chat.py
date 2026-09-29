@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from app import metrics
 from app.auth import Principal, current_principal
+from app.config import settings
 from app.kafka.producer import publish_chat_request
 from app.redis_client import get_redis
 from app.schemas import ChatAskRequest, ChatAskResponse
@@ -85,7 +86,10 @@ async def ask(
         ) from exc
 
     try:
-        await publish_chat_request(payload.to_message(principal.user_id, principal.tier))
+        question_no = settings.quota_limit_for_tier(principal.tier) - remaining
+        await publish_chat_request(
+            payload.to_message(principal.user_id, principal.tier, question_no)
+        )
     except Exception:
         # Enqueue lỗi = user chưa hỏi được gì, không được tính quota.
         await quota.refund(redis, principal.user_id)
