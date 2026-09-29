@@ -19,11 +19,11 @@ class Usage:
     def total_tokens(self) -> int:
         return self.prompt_tokens + self.completion_tokens
 
-    def as_dict(self) -> dict:
+    def as_dict(self, model: str | None = None) -> dict:
         return {
             "prompt_tokens": self.prompt_tokens,
             "completion_tokens": self.completion_tokens,
-            "cost_usd": round(estimate_cost(self), 6),
+            "cost_usd": round(estimate_cost(self, model), 6),
         }
 
 
@@ -39,10 +39,27 @@ def from_completion(completion) -> Usage:
     )
 
 
-def estimate_cost(usage: Usage) -> float:
-    """USD cho 1 lần gọi. Đơn giá lấy từ config — xem cảnh báo ở app/config.py
-    về việc phải đối chiếu lại với bảng giá hiện hành."""
-    return (
-        usage.prompt_tokens * settings.price_input_per_1m
-        + usage.completion_tokens * settings.price_output_per_1m
-    ) / 1_000_000
+def model_prices() -> dict[str, tuple[float, float]]:
+    """Đọc MODEL_PRICES dạng "model=in,out;model2=in,out"."""
+    prices = {}
+    for item in settings.model_prices.split(";"):
+        if not item.strip():
+            continue
+        name, _, pair = item.partition("=")
+        inp, out = pair.split(",")
+        prices[name.strip()] = (float(inp), float(out))
+    return prices
+
+
+def price_for(model: str | None) -> tuple[float, float]:
+    return model_prices().get(
+        model or "", (settings.price_input_per_1m, settings.price_output_per_1m)
+    )
+
+
+def estimate_cost(usage: Usage, model: str | None = None) -> float:
+    """USD cho 1 lần gọi, theo đơn giá của đúng model đã gọi. Đơn giá lấy từ
+    config — xem cảnh báo ở app/config.py về việc phải đối chiếu lại với bảng
+    giá hiện hành."""
+    price_in, price_out = price_for(model)
+    return (usage.prompt_tokens * price_in + usage.completion_tokens * price_out) / 1_000_000

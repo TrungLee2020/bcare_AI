@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     # OpenAI
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
+    # Model cho câu hỏi THỨ 1 TRONG NGÀY của mỗi user (đếm theo quota, reset
+    # 0h giờ VN): model mạnh cho câu đầu, các câu sau và bước tóm tắt dùng
+    # OPENAI_MODEL (model nhỏ, rẻ). Trống = mọi câu dùng OPENAI_MODEL.
+    # Lượt bị hoàn quota (lỗi hệ thống) thì lần hỏi lại vẫn là câu thứ 1.
+    openai_model_first: str = ""
     # SLA trả lời đã chốt ở Phase 0; timeout phải nhỏ hơn timeout của SSE để
     # client nhận được thông báo lỗi thay vì treo.
     openai_timeout_seconds: float = 25.0
@@ -170,6 +175,10 @@ class Settings(BaseSettings):
     # liệu báo cáo — giá thay đổi theo thời gian và theo model.
     price_input_per_1m: float = 0.15
     price_output_per_1m: float = 0.60
+    # Đơn giá riêng theo model khi dùng nhiều model (OPENAI_MODEL_FIRST):
+    # "model=in,out;model2=in,out" (USD / 1M token). Model không có ở đây thì
+    # dùng PRICE_INPUT_PER_1M / PRICE_OUTPUT_PER_1M ở trên.
+    model_prices: str = ""
 
     # Bật /test/enqueue (bypass quota, chỉ để verify pipeline Phase 1).
     # Mặc định TẮT — endpoint này bỏ qua quota nên không được bật ở production.
@@ -178,6 +187,13 @@ class Settings(BaseSettings):
     # Bearer token để đọc /metrics (số liệu chi phí, lưu lượng). Trống = không
     # cần token (chỉ dành cho dev); production bắt buộc đặt.
     metrics_token: str = ""
+
+    def model_for_question(self, question_no: int | None) -> str:
+        """Model cho câu hỏi thứ `question_no` trong ngày của user. None =
+        message cũ trước khi có trường này -> model mặc định."""
+        if question_no == 1 and self.openai_model_first:
+            return self.openai_model_first
+        return self.openai_model
 
     def quota_limit_for_tier(self, tier: str) -> int:
         return {

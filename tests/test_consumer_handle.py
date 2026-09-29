@@ -242,3 +242,32 @@ async def test_tra_loi_cham_thi_gui_thong_bao_dang_xu_ly(redis, published, monke
 
     assert [r.status for r in published] == ["processing", "ok"]
     assert published[0].detail == "slow"
+
+
+@pytest.mark.parametrize(
+    "question_no, expected", [(1, "model-manh"), (2, "model-nho"), (5, "model-nho"), (None, "model-nho")]
+)
+async def test_cau_dau_ngay_dung_model_manh_cau_sau_dung_model_nho(
+    redis, published, monkeypatch, question_no, expected
+):
+    monkeypatch.setattr(settings, "openai_model_first", "model-manh")
+    monkeypatch.setattr(settings, "openai_model", "model-nho")
+    fake = FakeOpenAI()
+    set_redis(redis)
+    openai_client.set_openai(fake)
+    try:
+        message = request()
+        message.question_no = question_no
+        await consumer._handle(message)
+    finally:
+        openai_client.set_openai(None)
+        set_redis(None)
+
+    assert [c["model"] for c in fake.calls] == [expected]
+    assert published[0].model == expected
+
+
+def test_khong_dat_model_first_thi_moi_cau_dung_openai_model(monkeypatch):
+    monkeypatch.setattr(settings, "openai_model_first", "")
+    monkeypatch.setattr(settings, "openai_model", "model-nho")
+    assert settings.model_for_question(1) == "model-nho"

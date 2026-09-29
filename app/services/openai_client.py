@@ -47,7 +47,11 @@ def start_openai() -> None:
         timeout=settings.openai_timeout_seconds,
         max_retries=0,
     )
-    logger.info("OpenAI client sẵn sàng (model=%s)", settings.openai_model)
+    logger.info(
+        "OpenAI client sẵn sàng (câu 1 trong ngày=%s, câu sau + tóm tắt=%s)",
+        settings.openai_model_first or settings.openai_model,
+        settings.openai_model,
+    )
 
 
 async def stop_openai() -> None:

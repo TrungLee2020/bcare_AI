@@ -29,6 +29,15 @@ LEAK_SHINGLE_SIZE = 8
 # ứng trong prompts/ thì phải sửa ở đây.
 ALLOWED_PHRASES = (
     "đây là thông tin tham khảo, không thay thế khám chữa bệnh trực tiếp",
+    # system_v4: dấu hiệu cấp cứu / ý định tự hại. Thiếu 2 câu này thì câu trả
+    # lời khuyên đi cấp cứu đúng hướng dẫn bị chặn là "lộ prompt" — đo với
+    # gpt-5.6-luna: 3/12 câu trả lời bình thường bị chặn nhầm.
+    "gọi 115 hoặc đến cơ sở y tế gần nhất ngay",
+    "gọi 115 hoặc tới cơ sở y tế gần nhất",
+    # system_v4: câu hỏi quyền lợi của gói cụ thể
+    "xem Bảng quyền lợi / Quy tắc bảo hiểm của mình hoặc gọi tổng đài bCare",
+    # system_v4: thuốc không kê đơn
+    "theo hướng dẫn trên bao bì, dược sĩ hoặc bác sĩ",
 )
 
 # Các thẻ có ý nghĩa cấu trúc trong prompt. Nội dung không tin cậy TUYỆT ĐỐI
@@ -149,11 +158,42 @@ def prompt_shingles(
     return frozenset(shingles)
 
 
+@lru_cache(maxsize=1)
+def _allowed_word_seqs() -> tuple[tuple[str, ...], ...]:
+    # Dài trước: câu dài chứa câu ngắn thì cắt câu dài.
+    seqs = {tuple(_words(phrase)) for phrase in ALLOWED_PHRASES}
+    return tuple(sorted(seqs, key=len, reverse=True))
+
+
+def _without_allowed(words: list[str]) -> list[list[str]]:
+    """Cắt các câu trong ALLOWED_PHRASES ra khỏi văn bản, trả về các đoạn còn
+    lại. Chỉ trừ shingle nằm GỌN trong câu được phép (ở `prompt_shingles`) là
+    chưa đủ: model viết tiếp tự nhiên sau câu đó ("...dược sĩ hoặc bác sĩ,
+    không tự ý...") tạo ra shingle vắt qua ranh giới, trùng với chữ đầu dòng kế
+    tiếp của prompt ("Không khuyên ngừng...") -> câu trả lời đúng vẫn bị chặn."""
+    segments, current, i = [], [], 0
+    while i < len(words):
+        for seq in _allowed_word_seqs():
+            if tuple(words[i : i + len(seq)]) == seq:
+                segments.append(current)
+                current = []
+                i += len(seq)
+                break
+        else:
+            current.append(words[i])
+            i += 1
+    segments.append(current)
+    return segments
+
+
 def leaks_prompt(
     text: str, kind: str, version: str, size: int = LEAK_SHINGLE_SIZE
 ) -> bool:
     """Văn bản có chứa `size` từ liên tiếp trùng với prompt `kind`/`version`?"""
-    return bool(_shingles(_words(text), size) & prompt_shingles(kind, version, size))
+    words = _words(text)
+    segments = _without_allowed(words) if kind == "system" else [words]
+    shingles = set().union(*(_shingles(seg, size) for seg in segments))
+    return bool(shingles & prompt_shingles(kind, version, size))
 
 
 def leaks_system_prompt(text: str, version: str) -> bool:
