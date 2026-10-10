@@ -4,6 +4,23 @@ Phía service của hợp đồng trong PatronyApp `docs/ai-chat-api.md`. Code: 
 
 **Base URL:** `https://chat.but.care` (KAN-84), tức `AI_CHAT_URL=https://chat.but.care`.
 
+## Trạng thái triển khai (cập nhật 2026-10-10)
+
+| Hạng mục | Trạng thái |
+|---|---|
+| Code `/v1/chat`, `/v1/report/monthly` | Xong, đã lên server (nhánh `feat/v1-app-api`) |
+| DNS `chat.but.care` → `14.225.29.169` | **Đang chờ** thêm bản ghi A ở nhà đăng ký (P.A Việt Nam) |
+| Chứng chỉ HTTPS `chat.but.care` | Cấp ngay khi DNS có hiệu lực |
+| Bảng `user_consents` trên Supabase | **Đang chờ** phía App deploy migration `20261010010000_ai_chat_consent.sql` |
+
+Trước khi DNS xong, `chat.but.care` chưa phân giải được, app sẽ gặp lỗi mạng. App cứ build với `AI_CHAT_URL=https://chat.but.care`, không cần đổi gì khi domain lên. Có thể kiểm tra bằng `curl https://chat.but.care/health`, ra `{"status":"ok",...}` là sẵn sàng.
+
+Phía App cần làm:
+- Deploy migration `user_consents` lên Supabase. Chưa có bảng thì mọi request trả `503 unavailable`.
+- Set `app_metadata.tier = "premium"` cho user premium, làm ở server bằng service role. Không set thì tính là free.
+- Phân biệt lỗi theo `error`, không chỉ theo HTTP status: **chỉ 401 là hết phiên**, 403 không đăng xuất (xem mục Lỗi).
+- Gửi `Idempotency-Key` khi thử lại (khuyến nghị).
+
 ## Xác thực
 
 `Authorization: Bearer <access token Supabase>`, project `zkqoaxfueiojwtvvoaov`.
