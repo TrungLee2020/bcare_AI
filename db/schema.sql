@@ -5,7 +5,7 @@
 
 CREATE TABLE IF NOT EXISTS chat_sessions (
 	id UUID NOT NULL, 
-	user_id BIGINT NOT NULL, 
+	user_id VARCHAR(64) NOT NULL, 
 	summary TEXT, 
 	summarized_through_id BIGINT, 
 	created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
@@ -18,7 +18,7 @@ CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_created ON chat_sessions (user
 CREATE TABLE IF NOT EXISTS chat_messages (
 	id BIGSERIAL NOT NULL, 
 	session_id UUID NOT NULL, 
-	user_id BIGINT NOT NULL, 
+	user_id VARCHAR(64) NOT NULL, 
 	request_id UUID NOT NULL, 
 	role VARCHAR(16) NOT NULL, 
 	content TEXT NOT NULL, 

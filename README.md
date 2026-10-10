@@ -5,6 +5,7 @@ OpenAI trả lời, đẩy kết quả về client qua SSE. Có quota theo ngày
 injection, và lưu lịch sử để hiểu ngữ cảnh hội thoại.
 
 Thiết kế tổng thể: [`docs/plan.md`](docs/plan.md).
+API cho app mobile (`/v1/chat`, `/v1/report/monthly`, token Supabase): [`docs/v1-app-api.md`](docs/v1-app-api.md).
 
 ## Luồng chính
 

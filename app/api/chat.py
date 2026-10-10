@@ -45,7 +45,7 @@ async def ask(
     is_new = await idempotency.claim(redis, request_id)
     if not is_new:
         cached = await idempotency.get_cached_response(redis, request_id)
-        if cached is not None and cached.get("user_id") != principal.user_id:
+        if cached is not None and str(cached.get("user_id")) != principal.user_id:
             # request_id do client tự sinh: trả câu trả lời đã cache mà không
             # đối chiếu chủ sở hữu là ai có request_id của người khác cũng đọc
             # được câu trả lời sức khoẻ của họ.

@@ -160,3 +160,28 @@ def validate(
         }
     )
     return ValidationOutcome(ok=True, answer=cleaned)
+
+
+# Báo cáo tháng: số liệu xét nghiệm hợp lệ có đơn vị mg ("đường huyết 110
+# mg/dL"), nên bỏ mẫu đơn vị thuốc đầu tiên, chỉ giữ các mẫu "uống N viên".
+_COMPILED_REPORT_PRESCRIPTION = _COMPILED_PRESCRIPTION[1:]
+
+
+def report_problems(summary: str, prompt_version: str) -> list[str]:
+    """Lý do không được hiển thị đoạn tóm tắt báo cáo tháng. Rỗng = đạt."""
+    from app.prompts import leaks_prompt
+
+    text = summary.strip()
+    normalized = normalize(text)
+    reasons = []
+    if not text:
+        reasons.append("empty_summary")
+    if len(text) > settings.report_summary_max_chars:
+        reasons.append("summary_too_long")
+    if leaks_prompt(text, "report", prompt_version):
+        reasons.append("report_prompt_leak")
+    if any(p.search(normalized) for p in _COMPILED_REPORT_PRESCRIPTION):
+        reasons.append("prescription_in_summary")
+    if any(p.search(normalized) for p in _COMPILED_DIAGNOSIS):
+        reasons.append("definitive_diagnosis")
+    return reasons

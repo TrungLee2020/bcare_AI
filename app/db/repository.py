@@ -26,7 +26,7 @@ class ConversationContext:
         return not self.summary and not self.recent
 
 
-async def ensure_session(db: AsyncSession, session_id: UUID, user_id: int) -> ChatSession:
+async def ensure_session(db: AsyncSession, session_id: UUID, user_id: str) -> ChatSession:
     """Lấy phiên chat, tạo mới nếu chưa có."""
     existing = await db.get(ChatSession, session_id)
     if existing is not None:
@@ -38,7 +38,7 @@ async def ensure_session(db: AsyncSession, session_id: UUID, user_id: int) -> Ch
 
 
 async def load_context(
-    db: AsyncSession, session_id: UUID, user_id: int, limit: int
+    db: AsyncSession, session_id: UUID, user_id: str, limit: int
 ) -> ConversationContext:
     """
     Nạp summary + `limit` message gần nhất CHƯA nằm trong summary.
@@ -68,7 +68,7 @@ async def save_turn(
     db: AsyncSession,
     *,
     session_id: UUID,
-    user_id: int,
+    user_id: str,
     request_id: UUID,
     question: str,
     answer: str,

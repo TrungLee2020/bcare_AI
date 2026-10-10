@@ -63,7 +63,7 @@ def ping_event() -> str:
     return f"event: ping\ndata: {int(time.time())}\n\n"
 
 
-async def event_stream(request: Request, user_id: int, last_request_id: UUID | None):
+async def event_stream(request: Request, user_id: str, last_request_id: UUID | None):
     queue = hub.subscribe(user_id)
     try:
         # Gửi ngay 1 khung khi vừa mở: đặt nhịp reconnect cho EventSource, và để
