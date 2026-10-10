@@ -15,14 +15,14 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
-def allowlist() -> set[int]:
+def allowlist() -> set[str]:
     raw = settings.rollout_allowlist.strip()
     if not raw:
         return set()
-    return {int(part) for part in raw.split(",") if part.strip()}
+    return {part.strip() for part in raw.split(",") if part.strip()}
 
 
-def bucket_of(user_id: int) -> int:
+def bucket_of(user_id: str) -> int:
     """
     Chia user vào 100 nhóm, ổn định theo user_id.
 
@@ -35,7 +35,7 @@ def bucket_of(user_id: int) -> int:
     return int.from_bytes(digest[:4], "big") % 100
 
 
-def is_enabled(user_id: int) -> bool:
+def is_enabled(user_id: str) -> bool:
     if not settings.rollout_enabled:
         return False
     if user_id in allowlist():

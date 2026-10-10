@@ -36,7 +36,7 @@ class ChatSession(Base):
     __tablename__ = "chat_sessions"
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
     # Tóm tắt các tin nhắn CŨ của phiên (sinh ở app/services/summarizer.py).
     # Có nó thì prompt chỉ cần chở summary + N tin gần nhất thay vì toàn bộ
     # lịch sử — vừa rẻ hơn vừa trả lời tốt hơn (prompt dài làm model loãng).
@@ -64,7 +64,7 @@ class ChatMessage(Base):
     session_id: Mapped[UUID] = mapped_column(
         Uuid, ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False
     )
-    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
     # request_id của message gốc từ Kafka. UNIQUE để idempotency không chỉ dựa
     # vào Redis: nếu Redis mất dữ liệu (restart, evict), ràng buộc này vẫn chặn
     # việc ghi trùng 1 lượt hỏi vào lịch sử.

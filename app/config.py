@@ -161,7 +161,44 @@ class Settings(BaseSettings):
     # Xác thực (Phase 6). Mặc định BẬT: user_id/tier lấy từ token đã ký, không
     # phải từ body do client gửi.
     auth_required: bool = True
+    # Token HMAC cũ cho /chat/* (công cụ dev, client cũ). Trống = tắt loại này.
     auth_secret: str = ""
+
+    # Supabase — app mobile gửi access token Supabase (xem app/auth.py).
+    # SUPABASE_URL: https://<project-ref>.supabase.co. Dùng để tải JWKS (project
+    # ký bằng signing key ES256/RS256), kiểm `iss`, và đọc bảng user_consents.
+    supabase_url: str = ""
+    # Chỉ khi project còn ký bằng JWT secret kiểu cũ (HS256).
+    supabase_jwt_secret: str = ""
+    supabase_jwt_audience: str = "authenticated"
+    supabase_jwks_cache_seconds: int = 600
+    # Service role key để đọc user_consents qua PostgREST. Chỉ ở server.
+    supabase_service_role_key: str = ""
+
+    # Đồng ý riêng cho AI (user_consents.ai_chat_version / ai_share_profile).
+    # Tắt CHỈ khi bảng chưa có trên Supabase; production bắt buộc bật.
+    consent_required: bool = True
+    # Trống = có ai_chat_version (không null) là được. Đặt giá trị = bắt buộc
+    # đúng version đó (đổi nội dung đồng ý -> người cũ phải đồng ý lại).
+    consent_required_version: str = ""
+    # Cache kết quả kiểm consent; rút lại đồng ý có hiệu lực sau tối đa ngần này.
+    consent_cache_seconds: int = 60
+    consent_table: str = "user_consents"
+    consent_user_column: str = "user_id"
+
+    # /v1/chat: chờ câu trả lời tối đa ngần này giây trong cùng request. Phải
+    # lớn hơn thời gian xử lý tối đa của consumer (timeout × số lần thử +
+    # backoff), và nhỏ hơn proxy_read_timeout của nginx cho /v1/.
+    v1_answer_timeout_seconds: float = 120.0
+    # health_context dài hơn ngần này (JSON) thì cắt — chặn chi phí prompt.
+    health_context_max_chars: int = 2000
+
+    # /v1/report/monthly
+    report_prompt_version: str = "v1"
+    report_max_per_day: int = 5
+    report_cache_seconds: int = 7 * 24 * 3600
+    report_input_max_chars: int = 6000
+    report_summary_max_chars: int = 1200
 
     # Rollout dần
     rollout_enabled: bool = True

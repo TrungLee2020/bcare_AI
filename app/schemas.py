@@ -14,8 +14,12 @@ class ChatRequestMessage(BaseModel):
     nhiều consumer instance chạy song song trong cùng consumer group.
     """
 
+    # coerce_numbers_to_str: message cũ (trước khi user_id là UUID Supabase)
+    # còn nằm trong topic lúc deploy mang user_id dạng số.
+    model_config = ConfigDict(coerce_numbers_to_str=True)
+
     request_id: UUID = Field(default_factory=uuid4)
-    user_id: int
+    user_id: str
     session_id: UUID | None = None
     tier: Literal["free", "premium"]
     content: str
@@ -25,6 +29,48 @@ class ChatRequestMessage(BaseModel):
     # không ở consumer: lúc consumer chạy, counter có thể đã tăng vì các câu
     # gửi sau. None = message cũ, trước khi có trường này.
     question_no: int | None = None
+    # Hồ sơ sức khoẻ app gửi kèm (chỉ khi user bật chia sẻ), đã chuẩn hoá ở API
+    # (xem app/api/v1.py). Chỉ đưa vào prompt của đúng lượt này, KHÔNG ghi vào
+    # lịch sử chat.
+    health_context: str | None = None
+
+
+class V1Message(BaseModel):
+    role: Literal["user", "assistant", "system"]
+    # Trần rộng cho các lượt cũ (server không dùng chúng, xem app/api/v1.py);
+    # lượt user cuối cùng bị kiểm chặt hơn ở endpoint.
+    content: str = Field(max_length=8000)
+
+
+class V1ChatRequest(BaseModel):
+    """Body của `POST /v1/chat` — hợp đồng với app (PatronyApp
+    docs/ai-chat-api.md). `extra="ignore"`: app thêm trường mới thì service
+    cũ vẫn chạy."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    conversation_id: str | None = Field(default=None, max_length=64)
+    # "Tối đa 24 lượt" — 1 lượt = 1 hỏi + 1 đáp, nên trần là 48 message.
+    messages: list[V1Message] = Field(min_length=1, max_length=48)
+    locale: str = Field(default="vi", max_length=16)
+    client_safety: Literal["none", "crisis", "emergency"] = "none"
+    health_context: dict | None = None
+
+
+class V1MonthlyReportRequest(BaseModel):
+    """Body của `POST /v1/report/monthly`: số liệu TỔNG HỢP 2 tháng do app tự
+    tính. Không ép schema chi tiết — app là bên định nghĩa các chỉ số; service
+    chỉ chặn kích thước và đưa nguyên khối vào prompt như dữ liệu."""
+
+    model_config = ConfigDict(extra="allow")
+
+    locale: str = Field(default="vi", max_length=16)
+
+
+class ReportSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str
 
 
 class ChatAskRequest(BaseModel):
@@ -46,7 +92,7 @@ class ChatAskRequest(BaseModel):
     content: str = Field(min_length=1, max_length=2000)
 
     def to_message(
-        self, user_id: int, tier: str, question_no: int | None = None
+        self, user_id: str, tier: str, question_no: int | None = None
     ) -> "ChatRequestMessage":
         return ChatRequestMessage(
             request_id=self.request_id,
@@ -95,8 +141,10 @@ class ChatAnswer(BaseModel):
 class ChatResponseMessage(BaseModel):
     """Message contract cho topic `chat_responses` (SSE layer sẽ đọc từ đây)."""
 
+    model_config = ConfigDict(coerce_numbers_to_str=True)
+
     request_id: UUID
-    user_id: int
+    user_id: str
     session_id: UUID | None = None
     # ok = model trả lời bình thường | blocked = bị chặn ở lớp lọc input/output
     # | error = gọi OpenAI lỗi, đã hết retry | processing = chưa xong, chỉ là

@@ -18,7 +18,7 @@ from app.schemas import ChatResponseMessage
 logger = logging.getLogger(__name__)
 
 
-def _key(user_id: int) -> str:
+def _key(user_id: str) -> str:
     return f"stream:{user_id}"
 
 
@@ -37,7 +37,7 @@ async def remember(redis: Redis, response: ChatResponseMessage) -> None:
 
 
 async def missed_since(
-    redis: Redis, user_id: int, last_request_id: UUID | str | None
+    redis: Redis, user_id: str, last_request_id: UUID | str | None
 ) -> list[ChatResponseMessage]:
     """
     Các response phát ra SAU `last_request_id`, theo thứ tự cũ -> mới.

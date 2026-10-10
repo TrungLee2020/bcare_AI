@@ -19,10 +19,10 @@ logger = logging.getLogger(__name__)
 # cơ chế replay khi reconnect.
 QUEUE_MAX_SIZE = 50
 
-_subscribers: dict[int, set[asyncio.Queue]] = defaultdict(set)
+_subscribers: dict[str, set[asyncio.Queue]] = defaultdict(set)
 
 
-def subscribe(user_id: int) -> asyncio.Queue:
+def subscribe(user_id: str) -> asyncio.Queue:
     queue: asyncio.Queue = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
     _subscribers[user_id].add(queue)
     logger.info(
@@ -31,14 +31,14 @@ def subscribe(user_id: int) -> asyncio.Queue:
     return queue
 
 
-def unsubscribe(user_id: int, queue: asyncio.Queue) -> None:
+def unsubscribe(user_id: str, queue: asyncio.Queue) -> None:
     _subscribers[user_id].discard(queue)
     if not _subscribers[user_id]:
         # Xoá hẳn key, nếu không dict sẽ phình theo tổng số user từng kết nối
         _subscribers.pop(user_id, None)
 
 
-def connection_count(user_id: int) -> int:
+def connection_count(user_id: str) -> int:
     return len(_subscribers.get(user_id, ()))
 
 

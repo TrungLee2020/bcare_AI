@@ -48,7 +48,7 @@ def _now() -> datetime:
     return datetime.now(ZoneInfo(settings.quota_timezone))
 
 
-def quota_key(user_id: int, now: datetime | None = None) -> str:
+def quota_key(user_id: str, now: datetime | None = None) -> str:
     now = now or _now()
     return f"quota:{user_id}:{now:%Y-%m-%d}"
 
@@ -63,7 +63,7 @@ def seconds_until_midnight(now: datetime | None = None) -> int:
     return int((midnight - now).total_seconds()) + 60
 
 
-async def consume(redis: Redis, user_id: int, tier: str) -> int:
+async def consume(redis: Redis, user_id: str, tier: str) -> int:
     """
     Trừ 1 lượt hỏi của user. Trả về số lượt CÒN LẠI trong ngày.
     Raise QuotaExceeded nếu đã hết lượt (và không trừ thêm gì).
@@ -77,7 +77,7 @@ async def consume(redis: Redis, user_id: int, tier: str) -> int:
     return limit - int(used)
 
 
-async def refund(redis: Redis, user_id: int, charged_at: datetime | None = None) -> None:
+async def refund(redis: Redis, user_id: str, charged_at: datetime | None = None) -> None:
     """
     Trả lại 1 lượt đã trừ (dùng khi enqueue Kafka lỗi -> user chưa hỏi được gì).
 
@@ -91,7 +91,7 @@ async def refund(redis: Redis, user_id: int, charged_at: datetime | None = None)
     await redis.eval(_REFUND_LUA, 1, quota_key(user_id, now))
 
 
-async def remaining(redis: Redis, user_id: int, tier: str) -> int:
+async def remaining(redis: Redis, user_id: str, tier: str) -> int:
     limit = settings.quota_limit_for_tier(tier)
     used = await redis.get(quota_key(user_id))
     return limit - int(used or 0)

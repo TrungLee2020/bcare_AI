@@ -14,14 +14,14 @@ def test_tat_han_thi_khong_ai_duoc_bat(monkeypatch):
     monkeypatch.setattr(settings, "rollout_enabled", False)
     monkeypatch.setattr(settings, "rollout_percentage", 100)
     monkeypatch.setattr(settings, "rollout_allowlist", "1,2,3")
-    assert not rollout.is_enabled(1)
+    assert not rollout.is_enabled("1")
 
 
 def test_allowlist_luon_duoc_bat_du_phan_tram_bang_0(monkeypatch):
     monkeypatch.setattr(settings, "rollout_percentage", 0)
     monkeypatch.setattr(settings, "rollout_allowlist", "10, 20 ,30")
-    assert rollout.is_enabled(10) and rollout.is_enabled(30)
-    assert not rollout.is_enabled(11)
+    assert rollout.is_enabled("10") and rollout.is_enabled("30")
+    assert not rollout.is_enabled("11")
 
 
 def test_ket_qua_on_dinh_giua_cac_lan_goi(monkeypatch):

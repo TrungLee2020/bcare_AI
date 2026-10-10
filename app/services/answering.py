@@ -79,8 +79,16 @@ async def answer_question(
         )
         return _response(blocked, "blocked", ",".join(verdict.reasons))
 
+    health_context = message.health_context
+    if health_context and input_filter.check(health_context).blocked:
+        # Hồ sơ cũng là chữ người dùng tự gõ. Có dấu hiệu injection thì bỏ hồ
+        # sơ, vẫn trả lời câu hỏi — không chặn cả lượt vì một ô ghi chú.
+        logger.warning("Bỏ health_context có dấu hiệu injection request_id=%s", message.request_id)
+        metrics.incr("health_context_dropped")
+        health_context = None
+
     generation = await openai_client.generate(
-        message.content, version, context, model
+        message.content, version, context, model, health_context
     )
     usage = generation.usage.as_dict(model)
     metrics.incr("openai_calls")

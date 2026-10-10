@@ -12,7 +12,7 @@ from app.redis_client import set_redis
 
 
 def test_token_hop_le_tra_ve_dung_danh_tinh():
-    assert verify_token(issue_token(7, "premium")) == Principal(7, "premium")
+    assert verify_token(issue_token(7, "premium")) == Principal("7", "premium")
 
 
 def test_token_bi_sua_noi_dung_thi_khong_qua():
@@ -107,7 +107,7 @@ async def test_user_id_trong_body_khong_gia_mao_duoc_nguoi_khac(client, monkeypa
     await client.post(
         "/chat/ask", json={"content": "đau đầu", "user_id": 42}, headers=headers
     )
-    assert published[0].user_id == 501
+    assert published[0].user_id == "501"
 
 
 def test_mac_dinh_phai_bat_auth():
