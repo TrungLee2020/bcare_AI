@@ -20,6 +20,29 @@ Phía App cần làm:
 - Set `app_metadata.tier = "premium"` cho user premium, làm ở server bằng service role. Không set thì tính là free.
 - Phân biệt lỗi theo `error`, không chỉ theo HTTP status: **chỉ 401 là hết phiên**, 403 không đăng xuất (xem mục Lỗi).
 - Gửi `Idempotency-Key` khi thử lại (khuyến nghị).
+- Gửi `SUPABASE_SERVICE_ROLE_KEY` cho backend qua kênh riêng (xem mục dưới).
+
+## Cấu hình Supabase phía backend
+
+Backend đặt các giá trị này **một lần** trong `.env` trên server. App **không** gửi chúng trong request.
+
+| Biến | Giá trị | Ai cung cấp | Mức nhạy cảm |
+|---|---|---|---|
+| `SUPABASE_URL` | `https://zkqoaxfueiojwtvvoaov.supabase.co` | Có sẵn từ khi tạo project Supabase (project ref trong đặc tả của App). App cũng dùng đúng URL này. | Công khai |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Project Settings → API → `service_role` | **Team App** (người có quyền vào project) | **Bí mật — quyền cao nhất** |
+| `SUPABASE_JWT_SECRET` | Supabase → Project Settings → API → JWT Secret | Team App, **chỉ khi** project còn ký token bằng JWT secret kiểu cũ (HS256). Project dùng signing key mới thì để trống. | Bí mật |
+
+Backend dùng `SUPABASE_URL` để:
+1. tải khoá công khai `…/auth/v1/.well-known/jwks.json` và verify access token app gửi lên;
+2. kiểm token đúng do project này phát (`iss`);
+3. đọc bảng `user_consents` qua `…/rest/v1/`.
+
+`SUPABASE_SERVICE_ROLE_KEY` đọc/ghi được toàn bộ database và bỏ qua RLS:
+- Gửi qua kênh riêng (tin nhắn riêng, password manager). Không dán vào group chat, Jira, và không commit lên git.
+- Chỉ nằm trong `.env` trên server, **không bao giờ** nhúng vào app mobile.
+- Lộ key thì xoay lại ngay trên Supabase rồi gửi key mới.
+
+Nếu team App không muốn đưa service role key: tạo một hàm RPC (`security definer`) chỉ trả `ai_chat_version`, `ai_share_profile` của một user. Backend sẽ gọi hàm đó bằng key quyền hẹp. Cách này cần sửa thêm [`app/services/consent.py`](../app/services/consent.py).
 
 ## Xác thực
 
