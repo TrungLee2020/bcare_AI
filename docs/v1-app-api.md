@@ -2,7 +2,7 @@
 
 Phía service của hợp đồng trong PatronyApp `docs/ai-chat-api.md`. Code: [`app/api/v1.py`](../app/api/v1.py).
 
-**Base URL:** `https://chat.but.care` (KAN-84), tức `AI_CHAT_URL=https://chat.but.care`. `https://ai.but.care` trỏ vào cùng service, dùng chung một chứng chỉ Let's Encrypt.
+**Base URL:** `https://chat.but.care` (KAN-84), tức `AI_CHAT_URL=https://chat.but.care`.
 
 ## Xác thực
 
@@ -99,6 +99,6 @@ Trả về `{"summary": "3–5 câu…"}`.
 1. `psql "$DATABASE_URL" -f db/migrations/20261010_user_id_supabase_uuid.sql` (`user_id` BIGINT → VARCHAR(64)).
 2. `.env`: đặt `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (và `SUPABASE_JWT_SECRET` nếu project dùng HS256). `ROLLOUT_ALLOWLIST` giờ là danh sách UUID.
 3. Trước khi migration `20261010010000_ai_chat_consent.sql` lên Supabase: `CONSENT_REQUIRED=false` (chỉ ở môi trường test; `APP_ENV=production` từ chối khởi động với giá trị này).
-4. DNS: bản ghi `A` `chat` → cùng IP với `ai.but.care`.
-5. nginx: copy lại `deploy/nginx/bcare-ai.conf` (thêm `chat.but.care`, `location /v1/`), `nginx -t && systemctl reload nginx`.
-6. Mở rộng chứng chỉ: `certbot certonly --webroot -w /var/www/html --cert-name ai.but.care --expand -d ai.but.care -d chat.but.care`, rồi `systemctl reload nginx`.
+4. DNS: bản ghi `A` `chat` → IP server.
+5. Chứng chỉ, xin TRƯỚC khi copy config nginx mới (config mới trỏ tới `/etc/letsencrypt/live/chat.but.care/`, chưa có thì `nginx -t` lỗi): `certbot certonly --webroot -w /var/www/html -d chat.but.care`. Lỗi xác minh thì dùng `systemctl stop nginx && certbot certonly --standalone -d chat.but.care; systemctl start nginx`.
+6. nginx: copy lại `deploy/nginx/bcare-ai.conf`, `nginx -t && systemctl reload nginx`.
