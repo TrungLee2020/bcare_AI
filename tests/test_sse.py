@@ -33,8 +33,8 @@ def clean_hub():
 
 def test_publish_toi_moi_ket_noi_cua_user():
     """1 user có thể mở nhiều tab; tab nào cũng phải nhận được câu trả lời."""
-    q1, q2 = hub.subscribe(1), hub.subscribe(1)
-    other = hub.subscribe(2)
+    q1, q2 = hub.subscribe("1"), hub.subscribe("1")
+    other = hub.subscribe("2")
 
     assert hub.publish(response(user_id=1)) == 2
     assert q1.qsize() == 1 and q2.qsize() == 1
@@ -46,16 +46,16 @@ def test_publish_khi_user_khong_online_tra_ve_0():
 
 
 def test_unsubscribe_don_sach_de_dict_khong_phinh():
-    q = hub.subscribe(5)
-    hub.unsubscribe(5, q)
-    assert hub.connection_count(5) == 0
-    assert 5 not in hub._subscribers
+    q = hub.subscribe("5")
+    hub.unsubscribe("5", q)
+    assert hub.connection_count("5") == 0
+    assert "5" not in hub._subscribers
 
 
 def test_hang_doi_day_thi_bo_event_cu_nhat():
     """Client chậm không được phép làm phình bộ nhớ vô hạn. Event bị bỏ vẫn lấy
     lại được bằng replay khi reconnect."""
-    q = hub.subscribe(7)
+    q = hub.subscribe("7")
     for _ in range(hub.QUEUE_MAX_SIZE + 5):
         hub.publish(response(user_id=7))
     assert q.qsize() == hub.QUEUE_MAX_SIZE
@@ -165,7 +165,7 @@ async def test_reconnect_nhan_lai_cau_tra_loi_da_lo(redis):
 
         frames = [
             frame
-            async for frame in event_stream(StubRequest(0), 1, seen.request_id)
+            async for frame in event_stream(StubRequest(0), "1", seen.request_id)
         ]
     finally:
         set_redis(None)
@@ -178,7 +178,7 @@ async def test_reconnect_nhan_lai_cau_tra_loi_da_lo(redis):
 async def test_khong_co_gi_de_phat_lai_thi_khong_gui_khung_nao(redis):
     set_redis(redis)
     try:
-        frames = [f async for f in event_stream(StubRequest(0), 1, None)]
+        frames = [f async for f in event_stream(StubRequest(0), "1", None)]
     finally:
         set_redis(None)
     assert len(frames) == OPENING
@@ -187,12 +187,12 @@ async def test_khong_co_gi_de_phat_lai_thi_khong_gui_khung_nao(redis):
 
 async def test_nhan_duoc_event_phat_ra_khi_dang_ket_noi(redis):
     set_redis(redis)
-    gen = event_stream(StubRequest(disconnect_after=5), 1, None)
+    gen = event_stream(StubRequest(disconnect_after=5), "1", None)
     try:
         await gen.__anext__()  # khung mở đầu
         task = asyncio.create_task(gen.__anext__())
         for _ in range(100):  # đợi generator kịp subscribe
-            if hub.connection_count(1):
+            if hub.connection_count("1"):
                 break
             await asyncio.sleep(0.01)
 
@@ -210,7 +210,7 @@ async def test_gui_keepalive_khi_khong_co_event(redis, monkeypatch):
     """Proxy/LB thường đóng kết nối idle sau 30-60s."""
     monkeypatch.setattr(settings, "sse_heartbeat_seconds", 0.05)
     set_redis(redis)
-    gen = event_stream(StubRequest(disconnect_after=5), 1, None)
+    gen = event_stream(StubRequest(disconnect_after=5), "1", None)
     try:
         await gen.__anext__()  # khung mở đầu
         frame = await asyncio.wait_for(gen.__anext__(), timeout=2)
@@ -223,15 +223,15 @@ async def test_gui_keepalive_khi_khong_co_event(redis, monkeypatch):
 
 async def test_dong_ket_noi_thi_don_sach_subscriber(redis):
     set_redis(redis)
-    gen = event_stream(StubRequest(disconnect_after=5), 42, None)
+    gen = event_stream(StubRequest(disconnect_after=5), "42", None)
     try:
         await gen.__anext__()  # khung mở đầu
         task = asyncio.create_task(gen.__anext__())
         for _ in range(100):
-            if hub.connection_count(42):
+            if hub.connection_count("42"):
                 break
             await asyncio.sleep(0.01)
-        assert hub.connection_count(42) == 1
+        assert hub.connection_count("42") == 1
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task  # đợi generator dừng hẳn rồi mới đóng được
@@ -239,7 +239,7 @@ async def test_dong_ket_noi_thi_don_sach_subscriber(redis):
         await gen.aclose()
         set_redis(None)
 
-    assert hub.connection_count(42) == 0
+    assert hub.connection_count("42") == 0
 
 
 async def test_response_co_header_chong_buffer_cua_nginx():
@@ -251,7 +251,7 @@ async def test_response_co_header_chong_buffer_cua_nginx():
         StubRequest(0),
         last_request_id=None,
         last_event_id=None,
-        principal=Principal(user_id=1, tier="free"),
+        principal=Principal(user_id="1", tier="free"),
     )
     assert result.media_type == "text/event-stream"
     assert result.headers["x-accel-buffering"] == "no"
@@ -280,7 +280,7 @@ async def test_header_last_event_id_uu_tien_hon_query_param(redis):
             StubRequest(0),
             last_request_id=first.request_id,
             last_event_id=second.request_id,
-            principal=Principal(user_id=1, tier="free"),
+            principal=Principal(user_id="1", tier="free"),
         )
         frames = [f async for f in result.body_iterator]
     finally:
@@ -296,11 +296,11 @@ async def test_dong_ket_noi_khi_qua_thoi_gian_song_toi_da(redis, monkeypatch):
     monkeypatch.setattr(settings, "sse_max_connection_seconds", 0)
     set_redis(redis)
     try:
-        frames = [f async for f in event_stream(StubRequest(disconnect_after=1000), 1, None)]
+        frames = [f async for f in event_stream(StubRequest(disconnect_after=1000), "1", None)]
     finally:
         set_redis(None)
     assert len(frames) == OPENING
-    assert hub.connection_count(1) == 0
+    assert hub.connection_count("1") == 0
 
 
 async def test_qua_nhieu_ket_noi_sse_cua_mot_user_bi_tu_choi(monkeypatch):
@@ -309,10 +309,10 @@ async def test_qua_nhieu_ket_noi_sse_cua_mot_user_bi_tu_choi(monkeypatch):
     from app.auth import Principal
 
     monkeypatch.setattr(settings, "sse_max_connections_per_user", 2)
-    hub.subscribe(1), hub.subscribe(1)
+    hub.subscribe("1"), hub.subscribe("1")
     with pytest.raises(HTTPException) as exc:
         await stream(
             StubRequest(0), last_request_id=None, last_event_id=None,
-            principal=Principal(user_id=1, tier="free"),
+            principal=Principal(user_id="1", tier="free"),
         )
     assert exc.value.status_code == 429

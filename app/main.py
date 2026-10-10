@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request, Response, status
 
 from app import metrics
+from app.api import v1
 from app.api.chat import router as chat_router
 from app.sse.stream import router as sse_router
 from app.config import settings
@@ -16,6 +17,7 @@ from app.kafka.response_consumer import start_response_consumer, stop_response_c
 from app.kafka.producer import publish_chat_request, start_producer, stop_producer
 from app.redis_client import start_redis, stop_redis
 from app.services import cost
+from app.services.consent import stop_consent_client
 from app.services.openai_client import start_openai, stop_openai
 from app.schemas import ChatRequestMessage
 
@@ -36,8 +38,14 @@ def production_config_problems() -> list[str]:
     problems = []
     if not settings.auth_required:
         problems.append("AUTH_REQUIRED phải là true")
-    if len(settings.auth_secret) < MIN_SECRET_LENGTH:
-        problems.append(f"AUTH_SECRET phải dài ít nhất {MIN_SECRET_LENGTH} ký tự")
+    if not (settings.supabase_url or settings.supabase_jwt_secret or settings.auth_secret):
+        problems.append("Cần SUPABASE_URL (hoặc SUPABASE_JWT_SECRET) để verify token của app")
+    if settings.auth_secret and len(settings.auth_secret) < MIN_SECRET_LENGTH:
+        problems.append(f"AUTH_SECRET phải dài ít nhất {MIN_SECRET_LENGTH} ký tự (hoặc để trống để tắt token HMAC)")
+    if settings.supabase_jwt_secret and len(settings.supabase_jwt_secret) < MIN_SECRET_LENGTH:
+        problems.append(f"SUPABASE_JWT_SECRET phải dài ít nhất {MIN_SECRET_LENGTH} ký tự")
+    if not settings.consent_required:
+        problems.append("CONSENT_REQUIRED phải là true (đồng ý riêng cho AI)")
     if settings.enable_test_endpoints:
         problems.append("ENABLE_TEST_ENDPOINTS phải là false (endpoint test bỏ qua quota)")
     if not settings.metrics_token:
@@ -78,10 +86,25 @@ def _check_model_config() -> None:
 def _check_auth_config() -> None:
     """Fail-closed: bật auth mà quên đặt secret thì phải chết ngay lúc khởi
     động, chứ không phải chạy ngon lành rồi chấp nhận mọi token."""
-    if settings.auth_required and not settings.auth_secret:
+    if settings.auth_required and not (
+        settings.auth_secret or settings.supabase_url or settings.supabase_jwt_secret
+    ):
         raise RuntimeError(
-            "AUTH_SECRET trống trong khi AUTH_REQUIRED=true. "
-            "Đặt AUTH_SECRET, hoặc AUTH_REQUIRED=false nếu đang chạy local."
+            "AUTH_REQUIRED=true nhưng chưa có cách verify token nào: đặt "
+            "SUPABASE_URL (token của app) và/hoặc AUTH_SECRET, hoặc "
+            "AUTH_REQUIRED=false nếu đang chạy local."
+        )
+    if settings.consent_required and not (
+        settings.supabase_url and settings.supabase_service_role_key
+    ):
+        raise RuntimeError(
+            "CONSENT_REQUIRED=true cần SUPABASE_URL và SUPABASE_SERVICE_ROLE_KEY "
+            "để đọc user_consents. Chỉ tắt (CONSENT_REQUIRED=false) khi bảng "
+            "chưa có trên Supabase."
+        )
+    if not settings.consent_required:
+        logger.warning(
+            "CONSENT_REQUIRED=false: KHÔNG kiểm đồng ý dùng AI trước khi trả lời."
         )
     if not settings.auth_required:
         logger.warning(
@@ -108,6 +131,7 @@ async def lifespan(app: FastAPI):
     await stop_consumer()
     await stop_producer()
     await stop_openai()
+    await stop_consent_client()
     await stop_db()
     await stop_redis()
 
@@ -124,6 +148,7 @@ app = FastAPI(
 )
 app.include_router(chat_router)
 app.include_router(sse_router)
+v1.install(app)
 
 
 @app.get("/health")

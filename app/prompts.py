@@ -46,6 +46,8 @@ RESERVED_TAGS = (
     "user_question",
     "session_summary",
     "transcript",
+    "health_context",
+    "report_data",
     "system",
     "assistant",
     "user",
