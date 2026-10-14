@@ -6,18 +6,16 @@ Gửi team App, 2026-10-10. Đặc tả đầy đủ phía service: [`docs/v1-ap
 
 ## KAN-84 — Domain HTTPS cho Trợ lý Bụt
 
-**Chốt:** `AI_CHAT_URL=https://chat.but.care`
+**Chốt (2026-10-14):** `AI_CHAT_URL=https://ai.but.care`. Không dùng `chat.but.care`.
 
 | Việc | Trạng thái |
 |---|---|
 | Code `/v1/chat`, `/v1/report/monthly` trên server | Xong |
-| Cấu hình nginx cho `chat.but.care` (TLS 1.2/1.3, không buffer SSE, timeout 150s) | Xong, chờ chứng chỉ |
-| Bản ghi DNS `chat` → `14.225.29.169` (nhà đăng ký P.A Việt Nam) | **Đang làm** |
-| Chứng chỉ Let's Encrypt, tự gia hạn | Cấp ngay khi DNS có hiệu lực |
+| DNS `ai.but.care` → `14.225.29.169`, chứng chỉ Let's Encrypt tự gia hạn | Xong |
+| Route `/v1/` trong nginx (TLS 1.2/1.3, không buffer SSE, timeout 150s) | **Đang deploy** |
 
-- App cứ build với URL trên, khi domain lên không phải sửa gì.
-- Trước lúc đó `chat.but.care` chưa phân giải được, app sẽ gặp lỗi mạng.
-- Sẵn sàng khi `curl https://chat.but.care/health` trả `{"status":"ok",...}`. Phía AI sẽ báo khi xong.
+- App build với URL trên.
+- Sẵn sàng khi `curl -X POST https://ai.but.care/v1/chat` không còn trả 404. Phía AI sẽ báo khi xong.
 
 ---
 

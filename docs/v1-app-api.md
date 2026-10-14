@@ -2,18 +2,19 @@
 
 Phía service của hợp đồng trong PatronyApp `docs/ai-chat-api.md`. Code: [`app/api/v1.py`](../app/api/v1.py).
 
-**Base URL:** `https://chat.but.care` (KAN-84), tức `AI_CHAT_URL=https://chat.but.care`.
+**Base URL:** `https://ai.but.care` (KAN-84, chốt 2026-10-14), tức `AI_CHAT_URL=https://ai.but.care`.
 
-## Trạng thái triển khai (cập nhật 2026-10-10)
+## Trạng thái triển khai (cập nhật 2026-10-14)
 
 | Hạng mục | Trạng thái |
 |---|---|
 | Code `/v1/chat`, `/v1/report/monthly` | Xong, đã lên server (nhánh `feat/v1-app-api`) |
-| DNS `chat.but.care` → `14.225.29.169` | **Đang chờ** thêm bản ghi A ở nhà đăng ký (P.A Việt Nam) |
-| Chứng chỉ HTTPS `chat.but.care` | Cấp ngay khi DNS có hiệu lực |
+| DNS `ai.but.care` → `14.225.29.169` | Xong |
+| Chứng chỉ HTTPS `ai.but.care` | Xong, tự gia hạn |
+| Route `/v1/` trong nginx | **Đang chờ** copy `deploy/nginx/bcare-ai.conf` lên server. Trước đó `/v1/*` trả 404 |
 | Bảng `user_consents` trên Supabase | **Đang chờ** phía App deploy migration `20261010010000_ai_chat_consent.sql` |
 
-Trước khi DNS xong, `chat.but.care` chưa phân giải được, app sẽ gặp lỗi mạng. App cứ build với `AI_CHAT_URL=https://chat.but.care`, không cần đổi gì khi domain lên. Có thể kiểm tra bằng `curl https://chat.but.care/health`, ra `{"status":"ok",...}` là sẵn sàng.
+Kiểm tra: `curl https://ai.but.care/health` ra `{"status":"ok",...}`; `curl -X POST https://ai.but.care/v1/chat` không ra 404 là route `/v1/` đã lên.
 
 Phía App cần làm:
 - Deploy migration `user_consents` lên Supabase. Chưa có bảng thì mọi request trả `503 unavailable`.
@@ -139,6 +140,5 @@ Trả về `{"summary": "3–5 câu…"}`.
 1. `psql "$DATABASE_URL" -f db/migrations/20261010_user_id_supabase_uuid.sql` (`user_id` BIGINT → VARCHAR(64)).
 2. `.env`: đặt `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (và `SUPABASE_JWT_SECRET` nếu project dùng HS256). `ROLLOUT_ALLOWLIST` giờ là danh sách UUID.
 3. Trước khi migration `20261010010000_ai_chat_consent.sql` lên Supabase: `CONSENT_REQUIRED=false` (chỉ ở môi trường test; `APP_ENV=production` từ chối khởi động với giá trị này).
-4. DNS: bản ghi `A` `chat` → IP server.
-5. Chứng chỉ, xin TRƯỚC khi copy config nginx mới (config mới trỏ tới `/etc/letsencrypt/live/chat.but.care/`, chưa có thì `nginx -t` lỗi): `certbot certonly --webroot -w /var/www/html -d chat.but.care`. Lỗi xác minh thì dùng `systemctl stop nginx && certbot certonly --standalone -d chat.but.care; systemctl start nginx`.
-6. nginx: copy lại `deploy/nginx/bcare-ai.conf`, `nginx -t && systemctl reload nginx`.
+4. DNS (bản ghi `A` `ai` → IP server) và chứng chỉ `ai.but.care` đã có sẵn.
+5. nginx: copy lại `deploy/nginx/bcare-ai.conf` (thêm `location /v1/`), `nginx -t && systemctl reload nginx`.
