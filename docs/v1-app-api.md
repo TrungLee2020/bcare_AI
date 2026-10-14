@@ -11,7 +11,7 @@ Phía service của hợp đồng trong PatronyApp `docs/ai-chat-api.md`. Code: 
 | Code `/v1/chat`, `/v1/report/monthly` | Xong, đã lên server (nhánh `feat/v1-app-api`) |
 | DNS `ai.but.care` → `14.225.29.169` | Xong |
 | Chứng chỉ HTTPS `ai.but.care` | Xong, tự gia hạn |
-| Route `/v1/` trong nginx | **Đang chờ** copy `deploy/nginx/bcare-ai.conf` lên server. Trước đó `/v1/*` trả 404 |
+| Route `/v1/` trong nginx | Xong (2026-10-14) |
 | Bảng `user_consents` trên Supabase | **Đang chờ** phía App deploy migration `20261010010000_ai_chat_consent.sql` |
 
 Kiểm tra: `curl https://ai.but.care/health` ra `{"status":"ok",...}`; `curl -X POST https://ai.but.care/v1/chat` không ra 404 là route `/v1/` đã lên.

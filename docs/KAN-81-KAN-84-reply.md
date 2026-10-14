@@ -12,10 +12,10 @@ Gửi team App, 2026-10-10. Đặc tả đầy đủ phía service: [`docs/v1-ap
 |---|---|
 | Code `/v1/chat`, `/v1/report/monthly` trên server | Xong |
 | DNS `ai.but.care` → `14.225.29.169`, chứng chỉ Let's Encrypt tự gia hạn | Xong |
-| Route `/v1/` trong nginx (TLS 1.2/1.3, không buffer SSE, timeout 150s) | **Đang deploy** |
+| Route `/v1/` trong nginx (TLS 1.2/1.3, không buffer SSE, timeout 150s) | Xong |
 
 - App build với URL trên.
-- Sẵn sàng khi `curl -X POST https://ai.but.care/v1/chat` không còn trả 404. Phía AI sẽ báo khi xong.
+- Đã sẵn sàng: `POST https://ai.but.care/v1/chat` không token trả `401 {"error":"unauthorized"}`.
 
 ---
 
