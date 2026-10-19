@@ -7,14 +7,17 @@ lộ system prompt, kê liều thuốc, chẩn đoán xác định, trả lời 
 hoặc tự mâu thuẫn giữa out_of_scope và refusal_reason.
 """
 
+import logging
 import re
 from dataclasses import dataclass, field
 
 from app import metrics
 from app.config import settings
-from app.prompts import leaks_system_prompt
+from app.prompts import leaked_shingles
 from app.schemas import ChatAnswer
 from app.services.input_filter import normalize
+
+logger = logging.getLogger(__name__)
 
 MAX_FOLLOW_UPS = 3
 
@@ -125,8 +128,10 @@ def validate(
         reasons.append("answer_too_long")
     # Soi cả follow-up: chúng cũng được hiển thị cho user, nên một câu hướng dẫn
     # bị chép vào đó là lộ prompt y như chép vào `answer`.
-    if leaks_system_prompt("\n".join([text, *follow_ups]), version):
+    leaked = leaked_shingles("\n".join([text, *follow_ups]), "system", version)
+    if leaked:
         reasons.append("system_prompt_leak")
+        logger.warning("Chặn vì trùng prompt system_%s: %s", version, sorted(leaked)[:5])
     if answer.out_of_scope and not answer.refusal_reason:
         reasons.append("missing_refusal_reason")
     if not answer.out_of_scope and answer.refusal_reason:
@@ -169,8 +174,6 @@ _COMPILED_REPORT_PRESCRIPTION = _COMPILED_PRESCRIPTION[1:]
 
 def report_problems(summary: str, prompt_version: str) -> list[str]:
     """Lý do không được hiển thị đoạn tóm tắt báo cáo tháng. Rỗng = đạt."""
-    from app.prompts import leaks_prompt
-
     text = summary.strip()
     normalized = normalize(text)
     reasons = []
@@ -178,8 +181,10 @@ def report_problems(summary: str, prompt_version: str) -> list[str]:
         reasons.append("empty_summary")
     if len(text) > settings.report_summary_max_chars:
         reasons.append("summary_too_long")
-    if leaks_prompt(text, "report", prompt_version):
+    leaked = leaked_shingles(text, "report", prompt_version)
+    if leaked:
         reasons.append("report_prompt_leak")
+        logger.warning("Chặn vì trùng prompt report_%s: %s", prompt_version, sorted(leaked)[:5])
     if any(p.search(normalized) for p in _COMPILED_REPORT_PRESCRIPTION):
         reasons.append("prescription_in_summary")
     if any(p.search(normalized) for p in _COMPILED_DIAGNOSIS):

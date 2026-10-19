@@ -151,3 +151,29 @@ def test_moi_mau_thoat_khoi_khoi_deu_bi_go_the(prompt):
     assert joined.count("<user_question>") == joined.count("</user_question>") == 1
     for tag in ("<system>", "<assistant>", "</session_summary>"):
         assert tag not in joined
+
+
+# --- báo cáo tháng: câu prompt dặn model nói không phải là "lộ prompt" ----------
+
+@pytest.mark.parametrize(
+    "summary",
+    [
+        # Dựng lại từ các bản tóm tắt bị chặn nhầm trên prod 2026-10-19 (3/4).
+        "Huyết áp trung bình tháng này là 136/85, giảm so với 142/89 tháng trước. "
+        "Bạn nên trao đổi với bác sĩ trong lần khám tới hoặc đi khám sớm nếu triệu chứng nặng.",
+        "Tỉ lệ uống thuốc tháng này là 62%. Bạn cố gắng dùng thuốc đều đặn như bác sĩ đã dặn, "
+        "nếu có điều gì băn khoăn hãy trao đổi với bác sĩ trong lần khám tới nhé.",
+        "Bạn nhớ uống thuốc đều đặn như bác sĩ đã dặn. Nếu thấy chóng mặt nhiều hơn, hãy đi khám sớm.",
+    ],
+)
+def test_bao_cao_lam_dung_loi_dan_khong_bi_chan(summary):
+    from app.services.output_validator import report_problems
+
+    assert report_problems(summary, settings.report_prompt_version) == []
+
+
+def test_bao_cao_chep_nguyen_prompt_van_bi_chan():
+    from app.services.output_validator import report_problems
+
+    leaked = load_prompt("report", settings.report_prompt_version)[:400]
+    assert "report_prompt_leak" in report_problems(leaked, settings.report_prompt_version)
