@@ -18,10 +18,10 @@ Kiểm tra: `curl https://ai.but.care/health` ra `{"status":"ok",...}`; `curl -X
 
 Phía App cần làm:
 - Deploy migration `user_consents` lên Supabase. Chưa có bảng thì mọi request trả `503 unavailable`.
-- Set `app_metadata.tier = "premium"` cho user premium, làm ở server bằng service role. Không set thì tính là free.
+- Set `app_metadata.tier = "premium"` cho user premium, làm ở phía App bằng service role (key này không đưa cho backend AI). Không set thì tính là free.
 - Phân biệt lỗi theo `error`, không chỉ theo HTTP status: **chỉ 401 là hết phiên**, 403 không đăng xuất (xem mục Lỗi).
 - Gửi `Idempotency-Key` khi thử lại (khuyến nghị).
-- Gửi `SUPABASE_SERVICE_ROLE_KEY` cho backend qua kênh riêng (xem mục dưới).
+- Gửi anon key cho backend (xem mục dưới). Backend **không** cần service role key.
 
 ## Cấu hình Supabase phía backend
 
@@ -30,7 +30,7 @@ Backend đặt các giá trị này **một lần** trong `.env` trên server. A
 | Biến | Giá trị | Ai cung cấp | Mức nhạy cảm |
 |---|---|---|---|
 | `SUPABASE_URL` | `https://zkqoaxfueiojwtvvoaov.supabase.co` | Có sẵn từ khi tạo project Supabase (project ref trong đặc tả của App). App cũng dùng đúng URL này. | Công khai |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Project Settings → API → `service_role` | **Team App** (người có quyền vào project) | **Bí mật — quyền cao nhất** |
+| `SUPABASE_ANON_KEY` | Supabase → Project Settings → API Keys → `anon` / publishable | Team App | Công khai (app cũng nhúng) |
 | `SUPABASE_JWT_SECRET` | Supabase → Project Settings → API → JWT Secret | Team App, **chỉ khi** project còn ký token bằng JWT secret kiểu cũ (HS256). Project dùng signing key mới thì để trống. | Bí mật |
 
 Backend dùng `SUPABASE_URL` để:
@@ -38,12 +38,7 @@ Backend dùng `SUPABASE_URL` để:
 2. kiểm token đúng do project này phát (`iss`);
 3. đọc bảng `user_consents` qua `…/rest/v1/`.
 
-`SUPABASE_SERVICE_ROLE_KEY` đọc/ghi được toàn bộ database và bỏ qua RLS:
-- Gửi qua kênh riêng (tin nhắn riêng, password manager). Không dán vào group chat, Jira, và không commit lên git.
-- Chỉ nằm trong `.env` trên server, **không bao giờ** nhúng vào app mobile.
-- Lộ key thì xoay lại ngay trên Supabase rồi gửi key mới.
-
-Nếu team App không muốn đưa service role key: tạo một hàm RPC (`security definer`) chỉ trả `ai_chat_version`, `ai_share_profile` của một user. Backend sẽ gọi hàm đó bằng key quyền hẹp. Cách này cần sửa thêm [`app/services/consent.py`](../app/services/consent.py).
+Đọc `user_consents` bằng anon key + **access token của chính user** (`apikey: <anon>`, `Authorization: Bearer <token user>`). RLS cho user đọc dòng của mình, nên backend không giữ key nào vượt RLS. Đề xuất của team App, áp dụng 2026-10-19 (trước đó dùng service role key).
 
 ## Xác thực
 
@@ -130,16 +125,16 @@ Trả về `{"summary": "3–5 câu…"}`.
 
 ## Đồng ý (consent)
 
-Đọc `user_consents` (cột `user_id`, `ai_chat_version`, `ai_share_profile`) qua PostgREST bằng service role key, cache 60 giây.
+Đọc `user_consents` (cột `user_id`, `ai_chat_version`, `ai_share_profile`) qua PostgREST bằng anon key + token của user. Chỉ cache kết quả **đã đồng ý** (60 giây); chưa đồng ý thì không cache, nên app mở màn đồng ý rồi gửi lại ngay là được.
 
 - `ai_chat_version` null → `403 consent_required`.
 - Đặt `CONSENT_REQUIRED_VERSION` thì bắt buộc đúng version đó.
-- Không đọc được bảng (chưa migrate, sai key, Supabase lỗi) → `503`. Không bao giờ coi là đã đồng ý.
+- Không đọc được bảng (chưa migrate, sai anon key, Supabase lỗi) → `503`. Không bao giờ coi là đã đồng ý.
 
 ## Deploy
 
 1. `psql "$DATABASE_URL" -f db/migrations/20261010_user_id_supabase_uuid.sql` (`user_id` BIGINT → VARCHAR(64)).
-2. `.env`: đặt `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (và `SUPABASE_JWT_SECRET` nếu project dùng HS256). `ROLLOUT_ALLOWLIST` giờ là danh sách UUID.
+2. `.env`: đặt `SUPABASE_URL`, `SUPABASE_ANON_KEY` (và `SUPABASE_JWT_SECRET` nếu project dùng HS256). `ROLLOUT_ALLOWLIST` giờ là danh sách UUID.
 3. Trước khi migration `20261010010000_ai_chat_consent.sql` lên Supabase: `CONSENT_REQUIRED=false` (chỉ ở môi trường test; `APP_ENV=production` từ chối khởi động với giá trị này).
 4. DNS (bản ghi `A` `ai` → IP server) và chứng chỉ `ai.but.care` đã có sẵn.
 5. nginx: copy lại `deploy/nginx/bcare-ai.conf` (thêm `location /v1/`), `nginx -t && systemctl reload nginx`.

@@ -172,8 +172,10 @@ class Settings(BaseSettings):
     supabase_jwt_secret: str = ""
     supabase_jwt_audience: str = "authenticated"
     supabase_jwks_cache_seconds: int = 600
-    # Service role key để đọc user_consents qua PostgREST. Chỉ ở server.
-    supabase_service_role_key: str = ""
+    # Anon key (công khai, app mobile cũng nhúng). Đọc user_consents bằng anon
+    # key + access token của chính user: RLS chỉ cho user đọc dòng của mình,
+    # nên backend không cần service role key (vượt RLS toàn database).
+    supabase_anon_key: str = ""
 
     # Đồng ý riêng cho AI (user_consents.ai_chat_version / ai_share_profile).
     # Tắt CHỈ khi bảng chưa có trên Supabase; production bắt buộc bật.

@@ -104,14 +104,18 @@ def install(app: FastAPI) -> None:
     app.add_exception_handler(V1Error, _v1_error_handler)
 
 
+def _bearer(request: Request) -> str:
+    header = request.headers.get("authorization", "")
+    return header[7:].strip() if header.lower().startswith("bearer ") else ""
+
+
 async def _principal(request: Request) -> Principal:
     if not settings.auth_required:
         return Principal(
             user_id=request.query_params.get("user_id", "0"),
             tier=request.query_params.get("tier", "free"),
         )
-    header = request.headers.get("authorization", "")
-    token = header[7:].strip() if header.lower().startswith("bearer ") else ""
+    token = _bearer(request)
     if not token:
         raise V1Error(401, "unauthorized", "Phiên đăng nhập không hợp lệ, vui lòng đăng nhập lại.")
     try:
@@ -122,13 +126,14 @@ async def _principal(request: Request) -> Principal:
         raise V1Error(401, "unauthorized", "Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại.") from exc
 
 
-async def _gate(principal: Principal) -> consent.Consent:
-    """Rollout + đồng ý. Dùng chung cho chat và báo cáo."""
+async def _gate(principal: Principal, request: Request) -> consent.Consent:
+    """Rollout + đồng ý. Dùng chung cho chat và báo cáo. Đọc đồng ý bằng
+    chính token của user (RLS), không dùng key quyền cao của server."""
     if not rollout.is_enabled(principal.user_id):
         metrics.incr("v1_not_in_rollout")
         raise V1Error(403, "not_enabled", "Trợ lý AI chưa được mở cho tài khoản của bạn.")
     try:
-        granted = await consent.check(get_redis(), principal.user_id)
+        granted = await consent.check(get_redis(), principal.user_id, _bearer(request))
     except consent.ConsentUnavailable as exc:
         metrics.incr("consent_unavailable")
         raise V1Error(503, "unavailable", "Hệ thống đang bận, vui lòng thử lại sau ít phút.") from exc
@@ -285,7 +290,7 @@ def _json_body(answer: ChatAnswer, conversation_id: UUID, quota_remaining: int |
 async def chat(payload: V1ChatRequest, request: Request):
     principal = await _principal(request)
     metrics.incr("v1_chat_requests")
-    granted = await _gate(principal)
+    granted = await _gate(principal, request)
 
     last = payload.messages[-1]
     question = last.content.strip()
@@ -420,7 +425,7 @@ def _today() -> str:
 async def monthly_report(payload: V1MonthlyReportRequest, request: Request):
     principal = await _principal(request)
     metrics.incr("v1_report_requests")
-    await _gate(principal)
+    await _gate(principal, request)
 
     data = payload.model_dump(exclude={"locale"})
     report_data = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))

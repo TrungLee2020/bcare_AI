@@ -57,7 +57,7 @@ Gửi team App, 2026-10-10. Đặc tả đầy đủ phía service: [`docs/v1-ap
 ## Phía App cần làm (chung cho cả hai)
 
 1. **Deploy migration** `20261010010000_ai_chat_consent.sql` lên Supabase. Chưa có bảng `user_consents` thì mọi request trả `503`.
-2. **Gửi `service_role` key** (Supabase → Project Settings → API) cho phía AI qua **tin nhắn riêng**, không gửi vào group hay ticket. Key chỉ đặt trong `.env` trên server. Lý do và phương án thay thế: mục "Cấu hình Supabase phía backend" trong `v1-app-api.md`.
+2. **Gửi anon key** cho phía AI. Backend đọc `user_consents` bằng anon key + token của user (RLS), không cần service role key.
 3. **Set `app_metadata.tier = "premium"`** cho user premium (bằng service role). Không set thì tính là free: 2 câu chat/ngày, premium 5 câu/ngày.
 4. **Xử lý lỗi theo trường `error`**: chỉ `401` là hết phiên, `403` không đăng xuất.
 
