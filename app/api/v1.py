@@ -46,7 +46,7 @@ from app.schemas import (
     V1ChatRequest,
     V1MonthlyReportRequest,
 )
-from app.services import consent, idempotency, openai_client, output_validator, quota, rollout
+from app.services import consent, cost, idempotency, openai_client, output_validator, quota, rollout
 from app.sse import hub
 
 logger = logging.getLogger(__name__)
@@ -463,10 +463,7 @@ async def monthly_report(payload: V1MonthlyReportRequest, request: Request):
         logger.exception("Tạo tóm tắt báo cáo thất bại user_id=%s", principal.user_id)
         raise V1Error(503, "unavailable", "Chưa tạo được bản tóm tắt, bạn thử lại sau nhé.") from exc
 
-    cost = usage.as_dict(settings.openai_model)
-    metrics.incr("openai_calls")
-    metrics.incr("tokens_total", usage.total_tokens)
-    metrics.incr("cost_usd", cost["cost_usd"])
+    cost.record(usage, settings.openai_model)
 
     summary = result.summary.strip()
     problems = output_validator.report_problems(summary, settings.report_prompt_version)
