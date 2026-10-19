@@ -93,3 +93,35 @@ def test_chi_phi_tinh_theo_don_gia_cua_dung_model(monkeypatch):
     # Model không có trong bảng -> đơn giá chung
     assert round(estimate_cost(usage, "khac"), 6) == 0.75
     assert round(estimate_cost(usage), 6) == 0.75
+
+
+def test_doc_token_suy_luan_va_ghi_metrics_theo_model():
+    from types import SimpleNamespace
+
+    from app import metrics
+    from app.services import cost
+
+    completion = SimpleNamespace(usage=SimpleNamespace(
+        prompt_tokens=900, completion_tokens=700,
+        completion_tokens_details=SimpleNamespace(reasoning_tokens=450),
+    ))
+    usage = cost.from_completion(completion)
+    assert usage.reasoning_tokens == 450
+    # chi phí tính trên completion_tokens, đã gồm phần suy luận
+    assert usage.as_dict("x")["reasoning_tokens"] == 450
+
+    cost.record(usage, "gpt-6-luna")
+    snap = metrics.snapshot()
+    assert snap["openai_calls:gpt-6-luna"] == 1
+    assert snap["completion_tokens:gpt-6-luna"] == 700
+    assert snap["reasoning_tokens:gpt-6-luna"] == 450
+    assert snap["cost_usd:gpt-6-luna"] == snap["cost_usd"] > 0
+
+
+def test_thieu_chi_tiet_suy_luan_thi_bang_0():
+    from types import SimpleNamespace
+
+    from app.services import cost
+
+    usage = cost.from_completion(SimpleNamespace(usage=SimpleNamespace(prompt_tokens=1, completion_tokens=2)))
+    assert usage.reasoning_tokens == 0

@@ -98,3 +98,16 @@ async def test_loi_openai_duoc_nem_len_cho_consumer_xu_ly():
             await answering.answer_question(request())
     finally:
         openai_client.set_openai(None)
+
+
+def test_khong_bao_gio_gui_temperature():
+    """gpt-6-luna từng bị gửi temperature=0.2 và OpenAI trả 400 cho mọi câu
+    đầu trong ngày. Chỉ dùng model reasoning nên không gửi temperature nữa."""
+    from app.services.openai_client import _sampling_params
+
+    params = _sampling_params()
+    assert "temperature" not in params
+    assert params["reasoning_effort"] == settings.openai_reasoning_effort
+    assert params["max_completion_tokens"] == (
+        settings.openai_max_output_tokens + settings.openai_reasoning_token_budget
+    )

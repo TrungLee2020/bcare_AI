@@ -82,23 +82,18 @@ async def _with_retry(factory):
     )
 
 
-def _is_reasoning_model(model: str) -> bool:
-    return model.startswith(("gpt-5", "o1", "o3", "o4"))
-
-
-def _sampling_params(model: str) -> dict:
+def _sampling_params() -> dict:
     """
-    Model reasoning (gpt-5*, o*) không nhận `temperature` khác mặc định và bỏ
-    hẳn `max_tokens`. `max_completion_tokens` của chúng tính cả token suy luận,
-    nên cộng thêm ngân sách suy luận để không bị hết giữa chừng rồi trả về rỗng.
+    Chỉ dùng model reasoning (gpt-5*, gpt-6*). Chúng không nhận `temperature`
+    khác mặc định (gửi kèm là 400, từng làm hỏng mọi câu đầu trong ngày với
+    gpt-6-luna) và bỏ hẳn `max_tokens`. `max_completion_tokens` tính cả token
+    suy luận, nên cộng thêm ngân sách suy luận để không bị hết giữa chừng rồi
+    trả về rỗng.
     """
-    params = {"max_completion_tokens": settings.openai_max_output_tokens}
-    if _is_reasoning_model(model):
-        params["max_completion_tokens"] += settings.openai_reasoning_token_budget
-        params["reasoning_effort"] = settings.openai_reasoning_effort
-    else:
-        params["temperature"] = settings.openai_temperature
-    return params
+    return {
+        "max_completion_tokens": settings.openai_max_output_tokens + settings.openai_reasoning_token_budget,
+        "reasoning_effort": settings.openai_reasoning_effort,
+    }
 
 
 def _response_format(name: str = "chat_answer", model=None) -> dict:
@@ -220,7 +215,7 @@ async def generate(
             model=model,
             messages=build_messages(content, version, context, health_context),
             response_format=_response_format(),
-            **_sampling_params(model),
+            **_sampling_params(),
         )
     )
     return Generation(
@@ -247,7 +242,7 @@ async def summarize(transcript: str, prompt_version: str | None = None) -> Sessi
                 },
             ],
             response_format=_response_format("session_summary", SessionSummary),
-            **_sampling_params(settings.openai_model),
+            **_sampling_params(),
         )
     )
     return _parse(completion, SessionSummary)
@@ -268,7 +263,7 @@ async def generate_report(report_data: str, prompt_version: str | None = None) -
                 },
             ],
             response_format=_response_format("report_summary", ReportSummary),
-            **_sampling_params(settings.openai_model),
+            **_sampling_params(),
         )
     )
     return _parse(completion, ReportSummary), from_completion(completion)

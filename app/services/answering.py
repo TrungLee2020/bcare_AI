@@ -10,7 +10,7 @@ from app.config import settings
 from app.db.repository import ConversationContext
 from app.schemas import ChatAnswer, ChatRequestMessage, ChatResponseMessage
 from app import metrics
-from app.services import input_filter, openai_client, output_validator
+from app.services import cost, input_filter, openai_client, output_validator
 
 logger = logging.getLogger(__name__)
 
@@ -90,11 +90,7 @@ async def answer_question(
     generation = await openai_client.generate(
         message.content, version, context, model, health_context
     )
-    usage = generation.usage.as_dict(model)
-    metrics.incr("openai_calls")
-    metrics.incr(f"openai_calls:{model}")
-    metrics.incr("tokens_total", generation.usage.total_tokens)
-    metrics.incr("cost_usd", usage["cost_usd"])
+    usage = cost.record(generation.usage, model)
 
     outcome = output_validator.validate(generation.answer, version, message.content)
     if not outcome.ok:

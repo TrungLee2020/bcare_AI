@@ -69,7 +69,7 @@ class Settings(BaseSettings):
 
     # OpenAI
     openai_api_key: str = ""
-    openai_model: str = "gpt-4o-mini"
+    openai_model: str = "gpt-5-nano"
     # Model cho câu hỏi THỨ 1 TRONG NGÀY của mỗi user (đếm theo quota, reset
     # 0h giờ VN): model mạnh cho câu đầu, các câu sau và bước tóm tắt dùng
     # OPENAI_MODEL (model nhỏ, rẻ). Trống = mọi câu dùng OPENAI_MODEL.
@@ -84,10 +84,8 @@ class Settings(BaseSettings):
     # hơn là để vừa khít: chỉ token SINH RA mới bị tính tiền, trần cao không
     # làm đắt thêm câu trả lời ngắn.
     openai_max_output_tokens: int = 1000
-    # Nhiệt độ thấp: đây là nội dung sức khoẻ/bảo hiểm, cần ổn định và bám sát
-    # hướng dẫn hơn là sáng tạo.
-    openai_temperature: float = 0.2
-    # Chỉ áp dụng cho model reasoning (gpt-5*, o*), thay cho temperature.
+    # Chỉ dùng model reasoning (gpt-5*, gpt-6*): chúng không nhận `temperature`
+    # khác mặc định, độ ổn định chỉnh bằng mức suy luận.
     # Thấp = nhanh, rẻ, và ít nguy cơ tiêu hết max_completion_tokens vào suy luận.
     openai_reasoning_effort: str = "low"
     # Token suy luận được tính vào max_completion_tokens: cộng thêm khoản này
@@ -215,8 +213,8 @@ class Settings(BaseSettings):
     # Giá OpenAI (USD / 1 triệu token) để ước tính chi phí.
     # !! Phải đối chiếu lại với bảng giá hiện hành của OpenAI trước khi tin số
     # liệu báo cáo — giá thay đổi theo thời gian và theo model.
-    price_input_per_1m: float = 0.15
-    price_output_per_1m: float = 0.60
+    price_input_per_1m: float = 0.05
+    price_output_per_1m: float = 0.40
     # Đơn giá riêng theo model khi dùng nhiều model (OPENAI_MODEL_FIRST):
     # "model=in,out;model2=in,out" (USD / 1M token). Model không có ở đây thì
     # dùng PRICE_INPUT_PER_1M / PRICE_OUTPUT_PER_1M ở trên.
