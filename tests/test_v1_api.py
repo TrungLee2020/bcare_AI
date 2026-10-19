@@ -272,6 +272,17 @@ async def test_allowlist_nhan_uuid(client, pipeline, monkeypatch):
     assert resp.status_code == 200
 
 
+async def test_user_khong_gioi_han_chat_qua_han_muc_va_ngoai_rollout(client, pipeline, monkeypatch):
+    monkeypatch.setattr(settings, "rollout_percentage", 0)
+    monkeypatch.setattr(settings, "quota_unlimited_users", USER)
+    for _ in range(settings.quota_free_per_day + 2):
+        resp = await client.post("/v1/chat", json=chat_body(), headers=auth())
+        assert resp.status_code == 200
+        assert sse_events(resp.text)[-1]["quota_remaining"] == settings.quota_free_per_day
+    other = await client.post("/v1/chat", json=chat_body(), headers=auth(sub="nguoi-khac"))
+    assert other.json()["error"] == "not_enabled"
+
+
 async def test_thu_lai_cung_idempotency_key_khong_tru_them_luot(client, pipeline, redis):
     headers = {**auth(), "Idempotency-Key": "lan-gui-1"}
     first = await client.post("/v1/chat", json=chat_body(), headers=headers)

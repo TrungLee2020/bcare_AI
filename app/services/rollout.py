@@ -11,6 +11,7 @@ import logging
 from hashlib import sha256
 
 from app.config import settings
+from app.services import quota
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,6 @@ def bucket_of(user_id: str) -> int:
 def is_enabled(user_id: str) -> bool:
     if not settings.rollout_enabled:
         return False
-    if user_id in allowlist():
+    if user_id in allowlist() or quota.is_unlimited(user_id):
         return True
     return bucket_of(user_id) < settings.rollout_percentage

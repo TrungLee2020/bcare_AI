@@ -53,6 +53,7 @@ Nếu team App không muốn đưa service role key: tạo một hàm RPC (`secu
 - `sub` là user id.
 - Gói lấy từ `app_metadata.tier` (`"premium"`, còn lại là free). Chỉ service role ghi được `app_metadata`. `user_metadata` thì user tự sửa được, nên không đọc gói từ đó.
 - Hạn mức: free 2 câu/ngày, premium 5 câu/ngày, reset 0h giờ VN.
+- User có UUID trong `QUOTA_UNLIMITED_USERS` (admin, tài khoản test; đặt ở `.env` server) chat không giới hạn và luôn được bật dù ngoài rollout. `quota_remaining` của họ luôn bằng hạn mức của gói.
 
 ## Lỗi
 

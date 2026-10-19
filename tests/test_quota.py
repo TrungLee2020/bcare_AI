@@ -61,3 +61,21 @@ async def test_counter_co_ttl_de_tu_reset_sang_ngay_moi(redis):
     await quota.consume(redis, user_id=5, tier="free")
     ttl = await redis.ttl(quota.quota_key(5))
     assert 0 < ttl <= 24 * 3600 + 60
+
+
+async def test_user_khong_gioi_han_hoi_bao_nhieu_cung_duoc(redis, monkeypatch):
+    monkeypatch.setattr(settings, "quota_unlimited_users", "khac, admin-1 ")
+    for _ in range(settings.quota_free_per_day + 5):
+        assert await quota.consume(redis, user_id="admin-1", tier="free") == settings.quota_free_per_day
+    assert await quota.remaining(redis, "admin-1", "free") == settings.quota_free_per_day
+    # không đụng counter, nên refund cũng không tạo gì
+    await quota.refund(redis, "admin-1")
+    assert await redis.get(quota.quota_key("admin-1")) is None
+
+
+async def test_user_ngoai_danh_sach_khong_gioi_han_van_bi_tinh_luot(redis, monkeypatch):
+    monkeypatch.setattr(settings, "quota_unlimited_users", "admin-1")
+    await quota.consume(redis, user_id="admin-10", tier="free")
+    await quota.consume(redis, user_id="admin-10", tier="free")
+    with pytest.raises(quota.QuotaExceeded):
+        await quota.consume(redis, user_id="admin-10", tier="free")

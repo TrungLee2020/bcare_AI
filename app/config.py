@@ -206,6 +206,9 @@ class Settings(BaseSettings):
     rollout_percentage: int = 0
     # Danh sách user_id luôn được bật, cách nhau bằng dấu phẩy (nhóm nội bộ)
     rollout_allowlist: str = ""
+    # user_id (UUID Supabase) chat không giới hạn lượt (admin, tài khoản test),
+    # cách nhau bằng dấu phẩy. Luôn được bật dù nằm ngoài rollout.
+    quota_unlimited_users: str = ""
 
     # Giá OpenAI (USD / 1 triệu token) để ước tính chi phí.
     # !! Phải đối chiếu lại với bảng giá hiện hành của OpenAI trước khi tin số
