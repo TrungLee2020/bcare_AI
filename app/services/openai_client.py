@@ -82,13 +82,19 @@ async def _with_retry(factory):
     )
 
 
+# Model đời cũ nhận `temperature`, không có `reasoning_effort`. Liệt kê nhóm
+# này thay vì liệt kê model reasoning: model mới (gpt-6-luna...) đều là
+# reasoning, và liệt kê thiếu một cái thì mọi câu gửi tới nó đều 400.
+_NON_REASONING_PREFIXES = ("gpt-4", "gpt-3.5", "chatgpt-4o")
+
+
 def _is_reasoning_model(model: str) -> bool:
-    return model.startswith(("gpt-5", "o1", "o3", "o4"))
+    return not model.startswith(_NON_REASONING_PREFIXES)
 
 
 def _sampling_params(model: str) -> dict:
     """
-    Model reasoning (gpt-5*, o*) không nhận `temperature` khác mặc định và bỏ
+    Model reasoning (gpt-5*, gpt-6*, o*) không nhận `temperature` khác mặc định và bỏ
     hẳn `max_tokens`. `max_completion_tokens` của chúng tính cả token suy luận,
     nên cộng thêm ngân sách suy luận để không bị hết giữa chừng rồi trả về rỗng.
     """

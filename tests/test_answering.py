@@ -98,3 +98,24 @@ async def test_loi_openai_duoc_nem_len_cho_consumer_xu_ly():
             await answering.answer_question(request())
     finally:
         openai_client.set_openai(None)
+
+
+@pytest.mark.parametrize(
+    "model, reasoning",
+    [
+        ("gpt-4o-mini", False),
+        ("gpt-4.1", False),
+        ("gpt-3.5-turbo", False),
+        ("gpt-5-nano", True),
+        ("gpt-6-luna", True),
+        ("o3-mini", True),
+    ],
+)
+def test_chi_model_doi_cu_moi_gui_temperature(model, reasoning):
+    """gpt-6-luna từng bị gửi temperature=0.2 và OpenAI trả 400 cho mọi câu
+    đầu trong ngày, vì danh sách model reasoning thiếu nó."""
+    from app.services.openai_client import _sampling_params
+
+    params = _sampling_params(model)
+    assert ("temperature" in params) is (not reasoning)
+    assert ("reasoning_effort" in params) is reasoning
