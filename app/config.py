@@ -172,8 +172,10 @@ class Settings(BaseSettings):
     supabase_jwt_secret: str = ""
     supabase_jwt_audience: str = "authenticated"
     supabase_jwks_cache_seconds: int = 600
-    # Service role key để đọc user_consents qua PostgREST. Chỉ ở server.
-    supabase_service_role_key: str = ""
+    # Anon key (công khai, app mobile cũng nhúng). Đọc user_consents bằng anon
+    # key + access token của chính user: RLS chỉ cho user đọc dòng của mình,
+    # nên backend không cần service role key (vượt RLS toàn database).
+    supabase_anon_key: str = ""
 
     # Đồng ý riêng cho AI (user_consents.ai_chat_version / ai_share_profile).
     # Tắt CHỈ khi bảng chưa có trên Supabase; production bắt buộc bật.
@@ -206,6 +208,9 @@ class Settings(BaseSettings):
     rollout_percentage: int = 0
     # Danh sách user_id luôn được bật, cách nhau bằng dấu phẩy (nhóm nội bộ)
     rollout_allowlist: str = ""
+    # user_id (UUID Supabase) chat không giới hạn lượt (admin, tài khoản test),
+    # cách nhau bằng dấu phẩy. Luôn được bật dù nằm ngoài rollout.
+    quota_unlimited_users: str = ""
 
     # Giá OpenAI (USD / 1 triệu token) để ước tính chi phí.
     # !! Phải đối chiếu lại với bảng giá hiện hành của OpenAI trước khi tin số

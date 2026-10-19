@@ -272,6 +272,17 @@ async def test_allowlist_nhan_uuid(client, pipeline, monkeypatch):
     assert resp.status_code == 200
 
 
+async def test_user_khong_gioi_han_chat_qua_han_muc_va_ngoai_rollout(client, pipeline, monkeypatch):
+    monkeypatch.setattr(settings, "rollout_percentage", 0)
+    monkeypatch.setattr(settings, "quota_unlimited_users", USER)
+    for _ in range(settings.quota_free_per_day + 2):
+        resp = await client.post("/v1/chat", json=chat_body(), headers=auth())
+        assert resp.status_code == 200
+        assert sse_events(resp.text)[-1]["quota_remaining"] == settings.quota_free_per_day
+    other = await client.post("/v1/chat", json=chat_body(), headers=auth(sub="nguoi-khac"))
+    assert other.json()["error"] == "not_enabled"
+
+
 async def test_thu_lai_cung_idempotency_key_khong_tru_them_luot(client, pipeline, redis):
     headers = {**auth(), "Idempotency-Key": "lan-gui-1"}
     first = await client.post("/v1/chat", json=chat_body(), headers=headers)
@@ -337,7 +348,7 @@ async def test_client_safety_tra_loi_co_dinh_khong_goi_model_khong_tru_luot(clie
 # --- consent + health_context -----------------------------------------------
 
 def _consent(monkeypatch, ai_chat: bool, share_profile: bool):
-    async def fake_check(redis, user_id):
+    async def fake_check(redis, user_id, access_token=""):
         return Consent(ai_chat=ai_chat, share_profile=share_profile)
 
     monkeypatch.setattr(consent, "check", fake_check)
@@ -349,6 +360,19 @@ async def test_chua_dong_y_ai_tra_403_consent_required(client, pipeline, monkeyp
     assert resp.status_code == 403
     assert resp.json()["error"] == "consent_required"
     assert pipeline.published == []
+
+
+async def test_kiem_dong_y_bang_chinh_token_cua_user(client, pipeline, monkeypatch):
+    tokens = []
+
+    async def fake_check(redis, user_id, access_token=""):
+        tokens.append(access_token)
+        return Consent(ai_chat=True, share_profile=False)
+
+    monkeypatch.setattr(consent, "check", fake_check)
+    token = make_token()
+    await client.post("/v1/chat", json=chat_body(), headers={"Authorization": f"Bearer {token}"})
+    assert tokens == [token]
 
 
 async def test_khong_dong_y_chia_se_ho_so_thi_bo_health_context(client, pipeline, monkeypatch):
@@ -368,7 +392,7 @@ async def test_dong_y_chia_se_thi_gui_health_context_dang_dong(client, pipeline,
 
 
 async def test_khong_doc_duoc_bang_dong_y_thi_503_khong_coi_la_da_dong_y(client, pipeline, monkeypatch):
-    async def broken(redis, user_id):
+    async def broken(redis, user_id, access_token=""):
         raise consent.ConsentUnavailable("down")
 
     monkeypatch.setattr(consent, "check", broken)
@@ -393,7 +417,7 @@ def test_health_context_vao_prompt_trong_khoi_rieng_truoc_cau_hoi():
 
 def _postgrest(monkeypatch, handler):
     monkeypatch.setattr(settings, "consent_required", True)
-    monkeypatch.setattr(settings, "supabase_service_role_key", "service-key")
+    monkeypatch.setattr(settings, "supabase_anon_key", "anon-key")
     seen = []
 
     def wrapped(request):
@@ -404,14 +428,14 @@ def _postgrest(monkeypatch, handler):
     return seen
 
 
-async def test_consent_doc_postgrest_bang_service_key_va_cache(monkeypatch, redis):
+async def test_consent_doc_postgrest_bang_token_user_va_cache(monkeypatch, redis):
     seen = _postgrest(
         monkeypatch,
         lambda r: httpx.Response(200, json=[{"ai_chat_version": "2026-10", "ai_share_profile": True}]),
     )
     try:
-        result = await consent.check(redis, USER)
-        again = await consent.check(redis, USER)
+        result = await consent.check(redis, USER, "user-token")
+        again = await consent.check(redis, USER, "user-token")
     finally:
         consent.set_http_client(None)
     assert result == again == Consent(ai_chat=True, share_profile=True)
@@ -419,7 +443,30 @@ async def test_consent_doc_postgrest_bang_service_key_va_cache(monkeypatch, redi
     request = seen[0]
     assert request.url.path == "/rest/v1/user_consents"
     assert request.url.params["user_id"] == f"eq.{USER}"
-    assert request.headers["apikey"] == "service-key"
+    assert request.headers["apikey"] == "anon-key"
+    assert request.headers["authorization"] == "Bearer user-token"
+
+
+async def test_chua_dong_y_khong_cache_de_gui_lai_ngay_sau_khi_dong_y(monkeypatch, redis):
+    rows = []
+    seen = _postgrest(monkeypatch, lambda r: httpx.Response(200, json=list(rows)))
+    try:
+        assert (await consent.check(redis, USER, "t")).ai_chat is False
+        rows.append({"ai_chat_version": "2026-10", "ai_share_profile": False})
+        assert (await consent.check(redis, USER, "t")).ai_chat is True
+    finally:
+        consent.set_http_client(None)
+    assert len(seen) == 2
+
+
+async def test_thieu_token_thi_khong_doc_duoc_dong_y(monkeypatch, redis):
+    seen = _postgrest(monkeypatch, lambda r: httpx.Response(200, json=[]))
+    try:
+        with pytest.raises(consent.ConsentUnavailable):
+            await consent.check(redis, USER, "")
+    finally:
+        consent.set_http_client(None)
+    assert seen == []
 
 
 @pytest.mark.parametrize(
@@ -436,7 +483,7 @@ async def test_danh_gia_dong_y(monkeypatch, redis, rows, required, expected):
     monkeypatch.setattr(settings, "consent_required_version", required)
     _postgrest(monkeypatch, lambda r: httpx.Response(200, json=rows))
     try:
-        assert await consent.check(redis, USER) == expected
+        assert await consent.check(redis, USER, "t") == expected
     finally:
         consent.set_http_client(None)
 
@@ -445,7 +492,7 @@ async def test_bang_chua_co_thi_bao_loi_khong_coi_la_chua_dong_y(monkeypatch, re
     _postgrest(monkeypatch, lambda r: httpx.Response(404, json={"code": "42P01"}))
     try:
         with pytest.raises(consent.ConsentUnavailable):
-            await consent.check(redis, USER)
+            await consent.check(redis, USER, "t")
     finally:
         consent.set_http_client(None)
 

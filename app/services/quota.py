@@ -44,6 +44,15 @@ class QuotaExceeded(Exception):
         )
 
 
+def unlimited_users() -> set[str]:
+    raw = settings.quota_unlimited_users.strip()
+    return {part.strip() for part in raw.split(",") if part.strip()} if raw else set()
+
+
+def is_unlimited(user_id: str) -> bool:
+    return str(user_id) in unlimited_users()
+
+
 def _now() -> datetime:
     return datetime.now(ZoneInfo(settings.quota_timezone))
 
@@ -67,8 +76,13 @@ async def consume(redis: Redis, user_id: str, tier: str) -> int:
     """
     Trừ 1 lượt hỏi của user. Trả về số lượt CÒN LẠI trong ngày.
     Raise QuotaExceeded nếu đã hết lượt (và không trừ thêm gì).
+
+    User không giới hạn: không đụng counter, luôn báo còn đủ `limit` lượt
+    (app nhận số nguyên như mọi user, không phải null).
     """
     limit = settings.quota_limit_for_tier(tier)
+    if is_unlimited(user_id):
+        return limit
     ok, used = await redis.eval(
         _CONSUME_LUA, 1, quota_key(user_id), limit, seconds_until_midnight()
     )
@@ -85,6 +99,8 @@ async def refund(redis: Redis, user_id: str, charged_at: datetime | None = None)
     hoàn: counter của ngày đó đã hết hạn, trừ vào ngày hôm nay là tặng thêm
     một lượt cho một câu hỏi của hôm qua.
     """
+    if is_unlimited(user_id):
+        return
     now = _now()
     if charged_at is not None and quota_key(user_id, charged_at.astimezone(now.tzinfo)) != quota_key(user_id, now):
         return
@@ -93,5 +109,7 @@ async def refund(redis: Redis, user_id: str, charged_at: datetime | None = None)
 
 async def remaining(redis: Redis, user_id: str, tier: str) -> int:
     limit = settings.quota_limit_for_tier(tier)
+    if is_unlimited(user_id):
+        return limit
     used = await redis.get(quota_key(user_id))
     return limit - int(used or 0)

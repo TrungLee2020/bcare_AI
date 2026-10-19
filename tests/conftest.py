@@ -20,7 +20,7 @@ def _reset_settings():
     keys = (
         "quota_free_per_day", "quota_premium_per_day", "auth_secret",
         "auth_required", "rollout_enabled", "rollout_percentage",
-        "rollout_allowlist",
+        "rollout_allowlist", "quota_unlimited_users",
     )
     before = {k: getattr(settings, k) for k in keys}
     settings.auth_secret = "test-secret"
@@ -28,6 +28,7 @@ def _reset_settings():
     settings.rollout_enabled = True
     settings.rollout_percentage = 100
     settings.rollout_allowlist = ""
+    settings.quota_unlimited_users = ""
     metrics.reset()
     yield
     for k, v in before.items():

@@ -3,12 +3,13 @@ Kiểm đồng ý riêng cho AI (`user_consents.ai_chat_version` / `ai_share_pro
 trên Supabase của app) TRƯỚC khi trả lời.
 
 App cũng tự kiểm, nhưng app không phải hàng rào: ai có access token đều gọi
-thẳng được API này. Đọc qua PostgREST bằng service role key — bảng có RLS, key
-thường của user chỉ đọc được dòng của chính họ và không dùng được ở server.
+thẳng được API này. Đọc qua PostgREST bằng anon key + access token của chính
+user: RLS cho user đọc dòng của mình, nên không cần service role key.
 
-Kết quả cache ngắn trong Redis (CONSENT_CACHE_SECONDS): mỗi câu hỏi một lần gọi
+Chỉ cache kết quả "đã đồng ý" (CONSENT_CACHE_SECONDS): mỗi câu hỏi một lần gọi
 Supabase là thừa, mà cache lâu thì người dùng rút lại đồng ý vẫn bị gửi dữ liệu
-sang OpenAI thêm một lúc.
+sang OpenAI thêm một lúc. "Chưa đồng ý" không cache: app mở màn đồng ý rồi gửi
+lại ngay, lần gửi lại đó phải thấy bản ghi mới.
 """
 
 import json
@@ -78,9 +79,10 @@ def _evaluate(row: dict | None) -> Consent:
     return Consent(ai_chat=ai_chat, share_profile=ai_chat and row.get("ai_share_profile") is True)
 
 
-async def _fetch(user_id: str) -> dict | None:
+async def _fetch(user_id: str, access_token: str) -> dict | None:
     url = f"{settings.supabase_url.rstrip('/')}/rest/v1/{settings.consent_table}"
-    key = settings.supabase_service_role_key
+    if not access_token:
+        raise ConsentUnavailable("thiếu access token của user")
     try:
         resp = await _http().get(
             url,
@@ -89,12 +91,13 @@ async def _fetch(user_id: str) -> dict | None:
                 "select": "ai_chat_version,ai_share_profile",
                 "limit": "1",
             },
-            headers={"apikey": key, "Authorization": f"Bearer {key}"},
+            headers={"apikey": settings.supabase_anon_key, "Authorization": f"Bearer {access_token}"},
         )
     except httpx.HTTPError as exc:
         raise ConsentUnavailable(str(exc)) from exc
     if resp.status_code != 200:
-        # 404/42P01 = bảng chưa có (migration chưa deploy), 401 = sai key...
+        # 404/42P01 = bảng chưa có (migration chưa deploy), 401 = sai anon key
+        # hoặc token hết hạn giữa chừng...
         # Đều là lỗi cấu hình phía mình, không phải "user chưa đồng ý".
         logger.error("Đọc %s lỗi HTTP %s: %s", settings.consent_table, resp.status_code, resp.text[:300])
         raise ConsentUnavailable(f"HTTP {resp.status_code}")
@@ -102,7 +105,7 @@ async def _fetch(user_id: str) -> dict | None:
     return rows[0] if rows else None
 
 
-async def check(redis: Redis, user_id: str) -> Consent:
+async def check(redis: Redis, user_id: str, access_token: str = "") -> Consent:
     if not settings.consent_required:
         return GRANTED_ALL
 
@@ -112,10 +115,11 @@ async def check(redis: Redis, user_id: str) -> Consent:
         return Consent(ai_chat=data["ai_chat"], share_profile=data["share_profile"])
 
     metrics.incr("consent_lookups")
-    consent = _evaluate(await _fetch(user_id))
-    await redis.set(
-        _key(user_id),
-        json.dumps({"ai_chat": consent.ai_chat, "share_profile": consent.share_profile}),
-        ex=settings.consent_cache_seconds,
-    )
+    consent = _evaluate(await _fetch(user_id, access_token))
+    if consent.ai_chat:
+        await redis.set(
+            _key(user_id),
+            json.dumps({"ai_chat": consent.ai_chat, "share_profile": consent.share_profile}),
+            ex=settings.consent_cache_seconds,
+        )
     return consent

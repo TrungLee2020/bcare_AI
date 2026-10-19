@@ -95,10 +95,10 @@ def _check_auth_config() -> None:
             "AUTH_REQUIRED=false nếu đang chạy local."
         )
     if settings.consent_required and not (
-        settings.supabase_url and settings.supabase_service_role_key
+        settings.supabase_url and settings.supabase_anon_key
     ):
         raise RuntimeError(
-            "CONSENT_REQUIRED=true cần SUPABASE_URL và SUPABASE_SERVICE_ROLE_KEY "
+            "CONSENT_REQUIRED=true cần SUPABASE_URL và SUPABASE_ANON_KEY "
             "để đọc user_consents. Chỉ tắt (CONSENT_REQUIRED=false) khi bảng "
             "chưa có trên Supabase."
         )
