@@ -40,6 +40,19 @@ ALLOWED_PHRASES = (
     "theo hướng dẫn trên bao bì, dược sĩ hoặc bác sĩ",
 )
 
+# Như trên, cho prompt báo cáo tháng (report_v1). Thiếu các câu này thì đoạn
+# tóm tắt làm đúng lời dặn bị chặn là "lộ prompt": đo trên prod 2026-10-19 với
+# gpt-5-nano, 3/4 bản tóm tắt bị chặn nhầm và app ẩn ô "Bụt tóm tắt".
+REPORT_ALLOWED_PHRASES = (
+    "trao đổi với bác sĩ trong lần khám tới, hoặc đi khám sớm nếu triệu chứng nặng",
+    "trao đổi với bác sĩ trong lần khám tới",
+    "đi khám sớm nếu triệu chứng nặng",
+    # lõi, không kèm động từ: model viết "dùng/uống thuốc đều đặn..." tuỳ câu
+    "đều đặn như bác sĩ đã dặn",
+)
+
+_ALLOWED_BY_KIND = {"system": ALLOWED_PHRASES, "report": REPORT_ALLOWED_PHRASES}
+
 # Các thẻ có ý nghĩa cấu trúc trong prompt. Nội dung không tin cậy TUYỆT ĐỐI
 # không được chứa chúng — xem `fence()`.
 RESERVED_TAGS = (
@@ -152,30 +165,28 @@ def prompt_shingles(
     """Tập các cụm `size` từ liên tiếp trong prompt, dùng để phát hiện văn bản
     có chép lại nội dung hướng dẫn hay không."""
     shingles = _shingles(_words(load_prompt(kind, version)), size)
-    if kind == "system":
-        allowed = set().union(*(
-            _shingles(_words(phrase), size) for phrase in ALLOWED_PHRASES
-        ))
-        shingles -= allowed
-    return frozenset(shingles)
+    allowed = set().union(*(
+        _shingles(_words(phrase), size) for phrase in _ALLOWED_BY_KIND.get(kind, ())
+    ))
+    return frozenset(shingles - allowed)
 
 
-@lru_cache(maxsize=1)
-def _allowed_word_seqs() -> tuple[tuple[str, ...], ...]:
+@lru_cache(maxsize=4)
+def _allowed_word_seqs(kind: str) -> tuple[tuple[str, ...], ...]:
     # Dài trước: câu dài chứa câu ngắn thì cắt câu dài.
-    seqs = {tuple(_words(phrase)) for phrase in ALLOWED_PHRASES}
+    seqs = {tuple(_words(phrase)) for phrase in _ALLOWED_BY_KIND.get(kind, ())}
     return tuple(sorted(seqs, key=len, reverse=True))
 
 
-def _without_allowed(words: list[str]) -> list[list[str]]:
-    """Cắt các câu trong ALLOWED_PHRASES ra khỏi văn bản, trả về các đoạn còn
+def _without_allowed(words: list[str], kind: str = "system") -> list[list[str]]:
+    """Cắt các câu được phép của prompt `kind` ra khỏi văn bản, trả về các đoạn còn
     lại. Chỉ trừ shingle nằm GỌN trong câu được phép (ở `prompt_shingles`) là
     chưa đủ: model viết tiếp tự nhiên sau câu đó ("...dược sĩ hoặc bác sĩ,
     không tự ý...") tạo ra shingle vắt qua ranh giới, trùng với chữ đầu dòng kế
     tiếp của prompt ("Không khuyên ngừng...") -> câu trả lời đúng vẫn bị chặn."""
     segments, current, i = [], [], 0
     while i < len(words):
-        for seq in _allowed_word_seqs():
+        for seq in _allowed_word_seqs(kind):
             if tuple(words[i : i + len(seq)]) == seq:
                 segments.append(current)
                 current = []
@@ -188,14 +199,23 @@ def _without_allowed(words: list[str]) -> list[list[str]]:
     return segments
 
 
+def leaked_shingles(
+    text: str, kind: str, version: str, size: int = LEAK_SHINGLE_SIZE
+) -> set[str]:
+    """Các cụm `size` từ liên tiếp trong văn bản trùng với prompt `kind`/`version`.
+    Là chữ của prompt (không dấu), không phải dữ liệu người dùng: ghi log được,
+    để biết câu nào bị chặn nhầm."""
+    words = _words(text)
+    segments = _without_allowed(words, kind) if kind in _ALLOWED_BY_KIND else [words]
+    shingles = set().union(*(_shingles(seg, size) for seg in segments))
+    return shingles & prompt_shingles(kind, version, size)
+
+
 def leaks_prompt(
     text: str, kind: str, version: str, size: int = LEAK_SHINGLE_SIZE
 ) -> bool:
     """Văn bản có chứa `size` từ liên tiếp trùng với prompt `kind`/`version`?"""
-    words = _words(text)
-    segments = _without_allowed(words) if kind == "system" else [words]
-    shingles = set().union(*(_shingles(seg, size) for seg in segments))
-    return bool(shingles & prompt_shingles(kind, version, size))
+    return bool(leaked_shingles(text, kind, version, size))
 
 
 def leaks_system_prompt(text: str, version: str) -> bool:
