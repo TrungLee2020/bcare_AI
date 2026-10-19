@@ -59,6 +59,7 @@ async def record_turn(
                 "prompt_version": response.prompt_version,
                 "out_of_scope": response.answer.out_of_scope,
                 "refusal_reason": response.answer.refusal_reason,
+                "should_see_doctor": response.answer.should_see_doctor,
                 "detail": response.detail,
             },
         )

@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -32,6 +33,10 @@ if used > 0 then
 end
 return 0
 """
+
+
+# Trần "không giới hạn" cho Lua: đủ lớn để không bao giờ chạm tới trong 1 ngày.
+_NO_LIMIT = 1_000_000
 
 
 class QuotaExceeded(Exception):
@@ -72,23 +77,34 @@ def seconds_until_midnight(now: datetime | None = None) -> int:
     return int((midnight - now).total_seconds()) + 60
 
 
-async def consume(redis: Redis, user_id: str, tier: str) -> int:
-    """
-    Trừ 1 lượt hỏi của user. Trả về số lượt CÒN LẠI trong ngày.
-    Raise QuotaExceeded nếu đã hết lượt (và không trừ thêm gì).
+@dataclass(frozen=True)
+class Charge:
+    remaining: int  # số lượt còn lại, báo cho app
+    question_no: int  # câu thứ mấy trong ngày, để chọn model
 
-    User không giới hạn: không đụng counter, luôn báo còn đủ `limit` lượt
-    (app nhận số nguyên như mọi user, không phải null).
+
+async def charge(redis: Redis, user_id: str, tier: str) -> Charge:
+    """
+    Trừ 1 lượt hỏi của user. Raise QuotaExceeded nếu đã hết lượt (và không
+    trừ thêm gì).
+
+    User không giới hạn vẫn được ĐẾM (để câu đầu trong ngày dùng đúng model
+    như user thật) nhưng không bị chặn, và luôn báo còn đủ `limit` lượt (app
+    nhận số nguyên như mọi user, không phải null).
     """
     limit = settings.quota_limit_for_tier(tier)
-    if is_unlimited(user_id):
-        return limit
+    unlimited = is_unlimited(user_id)
     ok, used = await redis.eval(
-        _CONSUME_LUA, 1, quota_key(user_id), limit, seconds_until_midnight()
+        _CONSUME_LUA, 1, quota_key(user_id), _NO_LIMIT if unlimited else limit, seconds_until_midnight()
     )
     if not int(ok):
         raise QuotaExceeded(tier, limit)
-    return limit - int(used)
+    return Charge(remaining=limit if unlimited else limit - int(used), question_no=int(used))
+
+
+async def consume(redis: Redis, user_id: str, tier: str) -> int:
+    """Như `charge`, chỉ trả về số lượt CÒN LẠI trong ngày."""
+    return (await charge(redis, user_id, tier)).remaining
 
 
 async def refund(redis: Redis, user_id: str, charged_at: datetime | None = None) -> None:
@@ -99,8 +115,6 @@ async def refund(redis: Redis, user_id: str, charged_at: datetime | None = None)
     hoàn: counter của ngày đó đã hết hạn, trừ vào ngày hôm nay là tặng thêm
     một lượt cho một câu hỏi của hôm qua.
     """
-    if is_unlimited(user_id):
-        return
     now = _now()
     if charged_at is not None and quota_key(user_id, charged_at.astimezone(now.tzinfo)) != quota_key(user_id, now):
         return

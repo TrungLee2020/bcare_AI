@@ -110,3 +110,21 @@ async def test_khong_ghi_duoc_vao_phien_cua_user_khac(db_maker):
 
     ctx = await history.load_context(request(sid, user_id=1))
     assert "câu của người lạ" not in [m.content for m in ctx.recent]
+
+
+async def test_luu_should_see_doctor_vao_meta_de_do_ti_le_khuyen_di_kham(db_maker):
+    import sqlalchemy
+
+    from app.db.models import ChatMessage
+
+    sid = uuid4()
+    msg = request(sid)
+    resp = response(msg)
+    resp.answer = make_answer(answer="Bạn nên đi khám sớm.", should_see_doctor=True)
+    await history.record_turn(msg, resp)
+
+    async with db_maker() as db:
+        meta = (await db.execute(
+            sqlalchemy.select(ChatMessage.meta).where(ChatMessage.role == "assistant")
+        )).scalar_one()
+    assert meta["should_see_doctor"] is True
