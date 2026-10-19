@@ -52,6 +52,11 @@ def production_config_problems() -> list[str]:
         problems.append("METRICS_TOKEN phải được đặt (/metrics lộ chi phí và lưu lượng)")
     if not settings.openai_api_key:
         problems.append("OPENAI_API_KEY trống")
+    # Dòng mẫu "<...>" chép từ hướng dẫn mà chưa thay giá trị thật: app vẫn
+    # chạy, rồi mọi request hỏng ở bước gọi Supabase/OpenAI với lỗi khó hiểu.
+    for name, value in settings.model_dump().items():
+        if isinstance(value, str) and value.strip().startswith("<"):
+            problems.append(f"{name.upper()} vẫn là giá trị mẫu, chưa thay giá trị thật")
     return problems
 
 

@@ -140,6 +140,8 @@ def test_cau_hinh_production_day_du_thi_dat(production_settings):
         ("enable_test_endpoints", True, "ENABLE_TEST_ENDPOINTS"),
         ("metrics_token", "", "METRICS_TOKEN"),
         ("openai_api_key", "", "OPENAI_API_KEY"),
+        ("supabase_anon_key", "<anon key team App gửi riêng>", "SUPABASE_ANON_KEY"),
+        ("rollout_allowlist", "<UUID của các tài khoản test>", "ROLLOUT_ALLOWLIST"),
     ],
 )
 def test_cau_hinh_cua_moi_truong_test_bi_chan_o_production(

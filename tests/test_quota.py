@@ -65,12 +65,17 @@ async def test_counter_co_ttl_de_tu_reset_sang_ngay_moi(redis):
 
 async def test_user_khong_gioi_han_hoi_bao_nhieu_cung_duoc(redis, monkeypatch):
     monkeypatch.setattr(settings, "quota_unlimited_users", "khac, admin-1 ")
-    for _ in range(settings.quota_free_per_day + 5):
-        assert await quota.consume(redis, user_id="admin-1", tier="free") == settings.quota_free_per_day
+    for n in range(1, settings.quota_free_per_day + 6):
+        charged = await quota.charge(redis, user_id="admin-1", tier="free")
+        assert charged.remaining == settings.quota_free_per_day
+        # vẫn đếm: câu đầu trong ngày dùng đúng model như user thật
+        assert charged.question_no == n
     assert await quota.remaining(redis, "admin-1", "free") == settings.quota_free_per_day
-    # không đụng counter, nên refund cũng không tạo gì
-    await quota.refund(redis, "admin-1")
-    assert await redis.get(quota.quota_key("admin-1")) is None
+
+
+async def test_question_no_cua_user_thuong_dem_tu_1(redis):
+    assert (await quota.charge(redis, user_id="u", tier="premium")).question_no == 1
+    assert (await quota.charge(redis, user_id="u", tier="premium")).question_no == 2
 
 
 async def test_user_ngoai_danh_sach_khong_gioi_han_van_bi_tinh_luot(redis, monkeypatch):

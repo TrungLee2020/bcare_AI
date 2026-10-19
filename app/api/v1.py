@@ -355,7 +355,7 @@ async def _enqueue(redis, principal, request_id, conversation_id, question, heal
         return await quota.remaining(redis, principal.user_id, principal.tier)
 
     try:
-        remaining = await quota.consume(redis, principal.user_id, principal.tier)
+        charged = await quota.charge(redis, principal.user_id, principal.tier)
     except quota.QuotaExceeded as exc:
         await idempotency.release(redis, request_id)
         metrics.incr("v1_quota_exceeded")
@@ -374,7 +374,7 @@ async def _enqueue(redis, principal, request_id, conversation_id, question, heal
                 session_id=conversation_id,
                 tier=principal.tier,
                 content=question,
-                question_no=settings.quota_limit_for_tier(principal.tier) - remaining,
+                question_no=charged.question_no,
                 health_context=health_context,
             )
         )
@@ -385,7 +385,7 @@ async def _enqueue(redis, principal, request_id, conversation_id, question, heal
         logger.exception("Enqueue thất bại request_id=%s", request_id)
         raise V1Error(503, "unavailable", "Hệ thống đang bận, vui lòng thử lại sau ít phút.") from exc
     metrics.incr("v1_chat_accepted")
-    return remaining
+    return charged.remaining
 
 
 async def _stream_pipeline(request, queue, user_id, request_id, conversation_id, quota_remaining):

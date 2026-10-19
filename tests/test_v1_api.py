@@ -281,6 +281,8 @@ async def test_user_khong_gioi_han_chat_qua_han_muc_va_ngoai_rollout(client, pip
         assert sse_events(resp.text)[-1]["quota_remaining"] == settings.quota_free_per_day
     other = await client.post("/v1/chat", json=chat_body(), headers=auth(sub="nguoi-khac"))
     assert other.json()["error"] == "not_enabled"
+    # câu đầu trong ngày vẫn là câu 1 -> được model của câu đầu như user thật
+    assert [m.question_no for m in pipeline.published] == list(range(1, settings.quota_free_per_day + 3))
 
 
 async def test_thu_lai_cung_idempotency_key_khong_tru_them_luot(client, pipeline, redis):
