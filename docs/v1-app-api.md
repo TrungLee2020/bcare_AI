@@ -80,6 +80,7 @@ Mọi lỗi do service trả về đều có dạng `{"error": "<mã>", "message
 - **`messages`**: tối đa 48 message (24 lượt). Lượt cuối phải là `role: "user"`, dài 1–2000 ký tự. **Service chỉ dùng lượt user cuối cùng.** Ngữ cảnh hội thoại do service tự lưu theo `conversation_id`, vì các lượt `assistant` do client gửi lên có thể bị sửa để chèn chỉ dẫn vào model. App cứ gửi đủ như đặc tả.
 - **`conversation_id`**: lấy từ `done` của lượt trước. Thiếu, hoặc không phải id do service cấp, thì mở hội thoại mới.
 - **`client_safety`** `crisis` / `emergency`: service **không gọi model và không trừ lượt**, trả câu cố định: `emergency` khuyên gọi 115, `crisis` hướng về 115 và màn hỗ trợ tâm lý của app. Cờ `should_see_doctor` = true.
+- **Câu chào** (tin nhắn chỉ có lời chào: "hi", "hello", "chào bạn", "xin chào Bụt ạ", viết không dấu cũng được): service **không gọi model và không trừ lượt**, trả câu cố định "Chào bạn! Mình là Bụt, …" kèm 3 câu hỏi gợi ý. Chào kèm câu hỏi ("Chào bạn, tôi bị đau đầu") vẫn đi qua model như thường.
 - **`health_context`**: chỉ dùng khi `user_consents.ai_share_profile = true`, nếu không thì bị bỏ qua. Service phẳng hoá thành các dòng `khoá: giá trị`, giới hạn 2000 ký tự, và chỉ đưa vào prompt của đúng lượt đó dưới dạng dữ liệu tham khảo. **Không ghi vào lịch sử chat.** Nếu có dấu hiệu prompt injection thì bỏ hồ sơ nhưng vẫn trả lời.
 - **`locale`**: hiện chỉ trả lời tiếng Việt.
 - **`Idempotency-Key`** (header, tuỳ chọn): giữ nguyên khi thử lại vì rớt mạng thì lần thử lại không trừ thêm lượt và nhận đúng câu trả lời của lần đầu.

@@ -285,6 +285,23 @@ async def test_user_khong_gioi_han_chat_qua_han_muc_va_ngoai_rollout(client, pip
     assert [m.question_no for m in pipeline.published] == list(range(1, settings.quota_free_per_day + 3))
 
 
+async def test_cau_chao_tra_loi_co_dinh_khong_goi_model_khong_tru_luot(client, pipeline):
+    resp = await client.post("/v1/chat", json=chat_body("Xin chào Bụt ạ"), headers=auth())
+    assert resp.status_code == 200
+    events = sse_events(resp.text)
+    reply = "".join(e["text"] for e in events if e["type"] == "delta")
+    assert reply.startswith("Chào bạn! Mình là Bụt")
+    assert events[-1]["quota_remaining"] == settings.quota_free_per_day
+    assert len(events[-1]["follow_up_questions"]) == 3
+    assert pipeline.published == []
+
+
+async def test_chao_kem_cau_hoi_van_qua_model(client, pipeline):
+    resp = await client.post("/v1/chat", json=chat_body("Chào bạn, tôi bị đau đầu 3 ngày"), headers=auth())
+    assert resp.status_code == 200
+    assert len(pipeline.published) == 1
+
+
 async def test_thu_lai_cung_idempotency_key_khong_tru_them_luot(client, pipeline, redis):
     headers = {**auth(), "Idempotency-Key": "lan-gui-1"}
     first = await client.post("/v1/chat", json=chat_body(), headers=headers)

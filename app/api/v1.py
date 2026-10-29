@@ -46,7 +46,7 @@ from app.schemas import (
     V1ChatRequest,
     V1MonthlyReportRequest,
 )
-from app.services import consent, cost, idempotency, openai_client, output_validator, quota, rollout
+from app.services import consent, cost, idempotency, openai_client, output_validator, quota, rollout, smalltalk
 from app.sse import hub
 
 logger = logging.getLogger(__name__)
@@ -317,6 +317,12 @@ async def chat(payload: V1ChatRequest, request: Request):
         return _respond_now(request, answer, conversation_id, None)
 
     redis = get_redis()
+    if smalltalk.is_greeting(question):
+        # Câu chào: trả lời cố định, không gọi model, không tính lượt.
+        metrics.incr("v1_greeting")
+        remaining = await quota.remaining(redis, principal.user_id, principal.tier)
+        return _respond_now(request, smalltalk.GREETING_ANSWER, conversation_id, remaining)
+
     request_id = _request_id(principal.user_id, request)
     # Nghe TRƯỚC khi publish: câu bị chặn ở lớp lọc input trả về trong vài ms,
     # đăng ký sau là lỡ mất.
