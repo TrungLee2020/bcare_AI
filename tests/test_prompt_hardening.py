@@ -177,3 +177,18 @@ def test_bao_cao_chep_nguyen_prompt_van_bi_chan():
 
     leaked = load_prompt("report", settings.report_prompt_version)[:400]
     assert "report_prompt_leak" in report_problems(leaked, settings.report_prompt_version)
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "Chào bạn, mình là Bụt, trợ lý sức khoẻ và bảo hiểm của bCare. Đau đầu 3 ngày có nhiều nguyên nhân.",
+        "Mình là Bụt, trợ lý sức khoẻ và bảo hiểm của bCare nhé. Bạn cần mình giúp gì?",
+    ],
+)
+def test_v5_tu_gioi_thieu_la_but_khong_bi_coi_la_lo_prompt(answer):
+    assert not leaks_prompt(answer, "system", "v5")
+
+
+def test_v5_chep_nguyen_doan_danh_tinh_van_bi_bat():
+    assert leaks_prompt(load_prompt("system", "v5")[:600], "system", "v5")

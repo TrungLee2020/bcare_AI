@@ -38,6 +38,8 @@ ALLOWED_PHRASES = (
     "xem Bảng quyền lợi / Quy tắc bảo hiểm của mình hoặc gọi tổng đài bCare",
     # system_v4: thuốc không kê đơn
     "theo hướng dẫn trên bao bì, dược sĩ hoặc bác sĩ",
+    # system_v5: câu tự giới thiệu prompt dặn model nói
+    "Bụt, trợ lý sức khoẻ và bảo hiểm của bCare",
 )
 
 # Như trên, cho prompt báo cáo tháng (report_v1). Thiếu các câu này thì đoạn
