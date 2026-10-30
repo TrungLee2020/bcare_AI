@@ -1,0 +1,406 @@
+{
+  "source": "lib/data/specialties.dart (app Bụt Care) — key khớp cột facilities.specialties",
+  "specialties": [
+    {
+      "key": "tim_mach",
+      "label": "Tim mạch",
+      "group": "noi",
+      "group_label": "Nội khoa",
+      "typical_symptoms": [
+        "Đau thắt ngực",
+        "tim đập nhanh kèm khó thở",
+        "mạch không đều",
+        "rối loạn mỡ máu",
+        "tiền sử cao huyết áp"
+      ],
+      "search_keywords_unaccented": [
+        "tim mach",
+        "dau nguc",
+        "dau that nguc",
+        "tim dap nhanh",
+        "kho tho",
+        "mach khong deu",
+        "mo mau",
+        "cao huyet ap",
+        "huyet ap",
+        "hoi hop"
+      ]
+    },
+    {
+      "key": "than_kinh",
+      "label": "Nội thần kinh",
+      "group": "noi",
+      "group_label": "Nội khoa",
+      "typical_symptoms": [
+        "Đau đầu không rõ nguyên nhân",
+        "mất ngủ thường xuyên",
+        "choáng khi đứng dậy",
+        "mất trí nhớ tạm thời",
+        "tê tay chân"
+      ],
+      "search_keywords_unaccented": [
+        "than kinh",
+        "dau dau",
+        "mat ngu",
+        "choang",
+        "hoa mat",
+        "chong mat",
+        "mat tri nho",
+        "te tay chan",
+        "run tay"
+      ]
+    },
+    {
+      "key": "ho_hap",
+      "label": "Hô hấp",
+      "group": "noi",
+      "group_label": "Nội khoa",
+      "typical_symptoms": [
+        "Ho kéo dài",
+        "thở khò khè",
+        "thở có tiếng rít",
+        "đờm có máu",
+        "hen suyễn",
+        "tiền sử lao phổi"
+      ],
+      "search_keywords_unaccented": [
+        "ho hap",
+        "ho keo dai",
+        "kho khe",
+        "tho rit",
+        "dom co mau",
+        "hen",
+        "suyen",
+        "lao phoi",
+        "kho tho"
+      ]
+    },
+    {
+      "key": "noi_tiet",
+      "label": "Nội tiết",
+      "group": "noi",
+      "group_label": "Nội khoa",
+      "typical_symptoms": [
+        "Sụt cân không rõ nguyên nhân",
+        "khát nước nhiều",
+        "vết thương lâu lành",
+        "tiểu đường",
+        "bướu cổ, tuyến giáp"
+      ],
+      "search_keywords_unaccented": [
+        "noi tiet",
+        "sut can",
+        "khat nuoc",
+        "vet thuong lau lanh",
+        "tieu duong",
+        "dai thao duong",
+        "buou co",
+        "tuyen giap",
+        "mat loi"
+      ]
+    },
+    {
+      "key": "tieu_hoa",
+      "label": "Tiêu hóa",
+      "group": "noi",
+      "group_label": "Nội khoa",
+      "typical_symptoms": [
+        "Đau bụng âm ỉ",
+        "ợ hơi, ợ chua",
+        "trào ngược",
+        "rối loạn đi cầu",
+        "viêm loét dạ dày"
+      ],
+      "search_keywords_unaccented": [
+        "tieu hoa",
+        "dau bung",
+        "o hoi",
+        "o chua",
+        "trao nguoc",
+        "roi loan di cau",
+        "tieu chay",
+        "tao bon",
+        "da day",
+        "viem loet",
+        "gan mat"
+      ]
+    },
+    {
+      "key": "co_xuong_khop",
+      "label": "Cơ xương khớp",
+      "group": "ngoai",
+      "group_label": "Ngoại khoa",
+      "typical_symptoms": [
+        "Đau các khớp tay chân",
+        "đau lưng",
+        "viêm khớp",
+        "thoái hóa",
+        "đau cổ vai gáy"
+      ],
+      "search_keywords_unaccented": [
+        "co xuong khop",
+        "dau khop",
+        "dau lung",
+        "viem khop",
+        "thoai hoa",
+        "co vai gay",
+        "gout",
+        "xuong khop"
+      ]
+    },
+    {
+      "key": "ngoai_chan_thuong",
+      "label": "Ngoại chấn thương",
+      "group": "ngoai",
+      "group_label": "Ngoại khoa",
+      "typical_symptoms": [
+        "Té ngã, va đập, tai nạn",
+        "bong gân",
+        "trật khớp",
+        "gãy xương",
+        "chấn thương thể thao"
+      ],
+      "search_keywords_unaccented": [
+        "chan thuong",
+        "te nga",
+        "va dap",
+        "tai nan",
+        "bong gan",
+        "trat khop",
+        "gay xuong",
+        "the thao",
+        "sung bam"
+      ]
+    },
+    {
+      "key": "ngoai_tong_quat",
+      "label": "Ngoại tổng quát",
+      "group": "ngoai",
+      "group_label": "Ngoại khoa",
+      "typical_symptoms": [
+        "Đau bụng ngoại khoa",
+        "thoát vị",
+        "trĩ, nứt kẽ hậu môn",
+        "nghi sỏi",
+        "khối u cần mổ"
+      ],
+      "search_keywords_unaccented": [
+        "ngoai tong quat",
+        "ngoai khoa",
+        "thoat vi",
+        "tri",
+        "hau mon",
+        "soi",
+        "khoi u",
+        "mo",
+        "phau thuat"
+      ]
+    },
+    {
+      "key": "da_lieu",
+      "label": "Da liễu",
+      "group": "khac",
+      "group_label": "Chuyên khoa khác",
+      "typical_symptoms": [
+        "Ngứa ngoài da",
+        "tróc vảy, nứt nẻ",
+        "nổi mẩn đỏ",
+        "mụn",
+        "nấm",
+        "sạm da"
+      ],
+      "search_keywords_unaccented": [
+        "da lieu",
+        "ngua",
+        "troc vay",
+        "nut ne",
+        "noi man",
+        "man do",
+        "mun",
+        "nam",
+        "sam da",
+        "di ung da"
+      ]
+    },
+    {
+      "key": "tai_mui_hong",
+      "label": "Tai Mũi Họng",
+      "group": "khac",
+      "group_label": "Chuyên khoa khác",
+      "typical_symptoms": [
+        "Đau họng, khó nuốt",
+        "ù tai, nghe kém, chảy mủ tai",
+        "nghẹt, chảy mũi",
+        "ngủ ngáy",
+        "viêm xoang"
+      ],
+      "search_keywords_unaccented": [
+        "tai mui hong",
+        "dau hong",
+        "kho nuot",
+        "u tai",
+        "nghe kem",
+        "chay mu tai",
+        "nghet mui",
+        "chay mui",
+        "ngu ngay",
+        "viem xoang",
+        "viem tai"
+      ]
+    },
+    {
+      "key": "mat",
+      "label": "Mắt",
+      "group": "khac",
+      "group_label": "Chuyên khoa khác",
+      "typical_symptoms": [
+        "Mờ mắt",
+        "đau, đỏ mắt",
+        "khám và đo mắt",
+        "cận, loạn"
+      ],
+      "search_keywords_unaccented": [
+        "mat",
+        "mo mat",
+        "dau mat",
+        "do mat",
+        "nhan khoa",
+        "can thi",
+        "loan thi"
+      ]
+    },
+    {
+      "key": "san",
+      "label": "Sản - Phụ khoa",
+      "group": "khac",
+      "group_label": "Chuyên khoa khác",
+      "typical_symptoms": [
+        "Thai sản",
+        "khám phụ khoa",
+        "rối loạn kinh nguyệt"
+      ],
+      "search_keywords_unaccented": [
+        "san",
+        "phu khoa",
+        "thai san",
+        "mang thai",
+        "kinh nguyet",
+        "san nhi"
+      ]
+    },
+    {
+      "key": "nhi",
+      "label": "Nhi",
+      "group": "khac",
+      "group_label": "Chuyên khoa khác",
+      "typical_symptoms": [
+        "Khám và điều trị cho trẻ em"
+      ],
+      "search_keywords_unaccented": [
+        "nhi",
+        "tre em",
+        "em be",
+        "so sinh"
+      ]
+    },
+    {
+      "key": "ung_buou",
+      "label": "Ung bướu",
+      "group": "khac",
+      "group_label": "Chuyên khoa khác",
+      "typical_symptoms": [
+        "Tầm soát và điều trị ung thư",
+        "khối u bất thường"
+      ],
+      "search_keywords_unaccented": [
+        "ung buou",
+        "ung thu",
+        "khoi u",
+        "tam soat ung thu",
+        "buou"
+      ]
+    },
+    {
+      "key": "rang_ham_mat",
+      "label": "Răng Hàm Mặt",
+      "group": "khac",
+      "group_label": "Chuyên khoa khác",
+      "typical_symptoms": [
+        "Răng, hàm mặt",
+        "nha khoa"
+      ],
+      "search_keywords_unaccented": [
+        "rang ham mat",
+        "rang",
+        "nha khoa",
+        "ham mat",
+        "sau rang"
+      ]
+    },
+    {
+      "key": "y_hoc_co_truyen",
+      "label": "Y học cổ truyền",
+      "group": "khac",
+      "group_label": "Chuyên khoa khác",
+      "typical_symptoms": [
+        "Đông y",
+        "châm cứu",
+        "phục hồi chức năng"
+      ],
+      "search_keywords_unaccented": [
+        "y hoc co truyen",
+        "dong y",
+        "cham cuu",
+        "phuc hoi",
+        "bam huyet"
+      ]
+    },
+    {
+      "key": "tam_than",
+      "label": "Tâm thần - Tâm lý",
+      "group": "khac",
+      "group_label": "Chuyên khoa khác",
+      "typical_symptoms": [
+        "Lo âu",
+        "trầm cảm",
+        "mất ngủ kéo dài",
+        "sức khỏe tinh thần"
+      ],
+      "search_keywords_unaccented": [
+        "tam than",
+        "tam ly",
+        "lo au",
+        "tram cam",
+        "stress",
+        "mat ngu keo dai",
+        "suc khoe tinh than"
+      ]
+    }
+  ],
+  "emergency": {
+    "key": "dot_quy",
+    "label": "Dấu hiệu đột quỵ / cấp cứu",
+    "group": "noi",
+    "group_label": "Nội khoa",
+    "typical_symptoms": [
+      "Méo miệng",
+      "yếu hoặc tê nửa người",
+      "nói đớ",
+      "đau đầu dữ dội đột ngột",
+      "chóng mặt mất thăng bằng"
+    ],
+    "search_keywords_unaccented": [
+      "dot quy",
+      "tai bien",
+      "meo mieng",
+      "yeu tay",
+      "te nua nguoi",
+      "noi dor",
+      "noi ngong",
+      "lo mo",
+      "mat thang bang",
+      "liet",
+      "chong mat mat thang bang"
+    ]
+  }
+}

@@ -63,6 +63,7 @@ RESERVED_TAGS = (
     "transcript",
     "health_context",
     "report_data",
+    "symptom_text",
     "system",
     "assistant",
     "user",

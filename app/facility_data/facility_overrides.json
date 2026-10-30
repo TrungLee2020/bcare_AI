@@ -1,0 +1,350 @@
+{
+ "note": "Sửa tạm dữ liệu facilities cho tới khi DB được sửa (KAN-115, facility_data_issues.json ngày 2026-10-29). Khoá là facilities.id; trường nào có ở đây thì đè lên giá trị đọc từ DB. specialties của 43 dòng is_general sai suy từ tên cơ sở; [] = chưa có key phù hợp (Nhiệt đới, Lão khoa, PHCN, MEDLATEC) nên cơ sở bị ẩn. Xoá dòng khi DB đã sửa.",
+ "overrides": {
+  "b5bef611-0111-40a4-a127-d5ddd3522482": {
+   "name": "Bệnh viện Bệnh Nhiệt đới",
+   "is_general": false,
+   "specialties": []
+  },
+  "9d503159-d61e-4136-8d97-fafa01e41bfe": {
+   "name": "Bệnh viện Bệnh Nhiệt đới Trung ương",
+   "is_general": false,
+   "specialties": []
+  },
+  "30282710-3793-4149-88eb-a16086d9bd10": {
+   "name": "Bệnh viện Bệnh nhiệt đới Trung ương (cơ sở 2)",
+   "is_general": false,
+   "specialties": []
+  },
+  "0f4964a2-2663-4f66-8a62-8c13e9740c8e": {
+   "name": "Bệnh viện Da liễu Trung ương",
+   "is_general": false,
+   "specialties": [
+    "da_lieu"
+   ]
+  },
+  "7867be8f-ac77-4530-8ed0-e3a0db6e7e82": {
+   "name": "Bệnh viện Điều dưỡng - Phục hồi chức năng Trung ương",
+   "is_general": false,
+   "specialties": []
+  },
+  "25318ab3-87b1-4526-8c51-24b605b05412": {
+   "name": "Bệnh viện Lão khoa Trung ương",
+   "is_general": false,
+   "specialties": []
+  },
+  "b185ce0d-22c7-47ee-a330-b971c772720d": {
+   "name": "Bệnh viện Mắt Trung ương",
+   "is_general": false,
+   "specialties": [
+    "mat"
+   ]
+  },
+  "81d1d15d-8739-47b5-a191-df12e56edeb0": {
+   "name": "Bệnh viện Nhi Trung ương",
+   "is_general": false,
+   "specialties": [
+    "nhi"
+   ],
+   "audience": "child"
+  },
+  "9a08efe5-2b08-4588-80ca-846a78919923": {
+   "name": "Bệnh viện Nhi Trung ương cơ sở 2",
+   "is_general": false,
+   "specialties": [
+    "nhi"
+   ],
+   "audience": "child"
+  },
+  "b9fc465f-0ab2-48de-be05-86ad380491f1": {
+   "name": "Bệnh viện Nội tiết Trung ương",
+   "is_general": false,
+   "specialties": [
+    "noi_tiet"
+   ]
+  },
+  "4381c6c0-d9ec-423a-ac97-b050954baad0": {
+   "name": "Bệnh viện Nội tiết Trung ương",
+   "is_general": false,
+   "specialties": [
+    "noi_tiet"
+   ]
+  },
+  "b841ec7f-8dca-47fa-916b-c3afc8ec57bb": {
+   "name": "Bệnh viện Phổi Trung ương",
+   "is_general": false,
+   "specialties": [
+    "ho_hap"
+   ]
+  },
+  "1b750ede-fca1-42cb-8a30-8c0985e82cd4": {
+   "name": "Bệnh viện Phong - Da liễu Trung ương Quy Hòa",
+   "is_general": false,
+   "specialties": [
+    "da_lieu"
+   ]
+  },
+  "ecd0d1cd-f6a9-40a8-a707-d97684dcce84": {
+   "name": "Bệnh viện Phong - Da liễu Trung ương Quỳnh Lập",
+   "is_general": false,
+   "specialties": [
+    "da_lieu"
+   ]
+  },
+  "1d673560-f7f1-4e36-abc1-28162b0779e8": {
+   "name": "Bệnh viện Phong - Da liễu Trung ương Quỳnh Lập (cơ sở 2)",
+   "is_general": false,
+   "specialties": [
+    "da_lieu"
+   ]
+  },
+  "ccf94953-6418-45c3-b871-bb0c11edca3a": {
+   "name": "Bệnh viện Phụ sản - Nhi Đà Nẵng",
+   "is_general": false,
+   "specialties": [
+    "san",
+    "nhi"
+   ]
+  },
+  "6f99960f-bd58-4eac-8a67-7a2ce3bb9e46": {
+   "name": "Bệnh viện Phụ sản Trung ương",
+   "is_general": false,
+   "specialties": [
+    "san"
+   ]
+  },
+  "b5671b69-2e0e-424a-98b7-62be501bd02e": {
+   "name": "Bệnh viện Phụ sản Trung ương cơ sở 2",
+   "is_general": false,
+   "specialties": [
+    "san"
+   ]
+  },
+  "9d9426fe-5d4e-45f0-b0dc-823afc4b2aa6": {
+   "name": "Bệnh viện Phục hồi chức năng - Điều trị bệnh nghề nghiệp",
+   "is_general": false,
+   "specialties": []
+  },
+  "8a881cf6-d985-4927-afcc-ceaf1aed631b": {
+   "name": "Bệnh viện Phục hồi chức năng Hà Nội",
+   "is_general": false,
+   "specialties": []
+  },
+  "5b1bab49-3188-45fc-9783-1b7246c2ec04": {
+   "name": "Bệnh viện Răng Hàm Mặt Trung ương Hà Nội",
+   "is_general": false,
+   "specialties": [
+    "rang_ham_mat"
+   ]
+  },
+  "d4d50c98-d977-4f5c-ab70-9320ad9b82d6": {
+   "name": "Bệnh viện Răng Hàm Mặt Trung ương Thành phố Hồ Chí Minh",
+   "is_general": false,
+   "specialties": [
+    "rang_ham_mat"
+   ]
+  },
+  "6a83f64e-739d-4d3b-86e0-143df825d61e": {
+   "name": "Bệnh viện Tâm thần Trung ương 1",
+   "is_general": false,
+   "specialties": [
+    "tam_than"
+   ]
+  },
+  "45a61b1d-d8db-4d15-936a-2d46976e4f3d": {
+   "name": "Bệnh viện Tâm thần Trung ương 2",
+   "is_general": false,
+   "specialties": [
+    "tam_than"
+   ]
+  },
+  "f4d2fa9f-9b15-4580-a474-06894c30ef3f": {
+   "name": "Bệnh viện Tim Hà Nội",
+   "is_general": false,
+   "specialties": [
+    "tim_mach"
+   ]
+  },
+  "ad4c8cc0-fd35-45bd-94cd-a806783fce79": {
+   "name": "Bệnh viện Tim Hà Nội",
+   "is_general": false,
+   "specialties": [
+    "tim_mach"
+   ]
+  },
+  "ce98d1a0-9dab-40ac-9803-f07b3dea93a7": {
+   "name": "Bệnh viện Ung bướu Đà Nẵng",
+   "is_general": false,
+   "specialties": [
+    "ung_buou"
+   ]
+  },
+  "228d8519-0395-4fba-a1df-19d1bdda5867": {
+   "name": "Bệnh viện Ung bướu Hà Nội",
+   "is_general": false,
+   "specialties": [
+    "ung_buou"
+   ]
+  },
+  "dc571f09-fa42-4e34-a1db-4bf08e3e93dc": {
+   "name": "Bệnh viện Ung bướu thành phố Cần Thơ",
+   "is_general": false,
+   "specialties": [
+    "ung_buou"
+   ]
+  },
+  "b0994c5b-d7f4-4d9b-a88b-46adb287d857": {
+   "name": "Bệnh viện Y học cổ truyền Hà Đông",
+   "is_general": false,
+   "specialties": [
+    "y_hoc_co_truyen"
+   ]
+  },
+  "bd4d51ba-b056-494f-879a-d65643648333": {
+   "name": "Bệnh viện Y học cổ truyền thành phố Cần Thơ",
+   "is_general": false,
+   "specialties": [
+    "y_hoc_co_truyen"
+   ]
+  },
+  "1ae8cb53-1d0f-4114-93e2-ce1b62386097": {
+   "name": "Bệnh viện Y học cổ truyền Trung ương",
+   "is_general": false,
+   "specialties": [
+    "y_hoc_co_truyen"
+   ]
+  },
+  "2c7c486d-6c6f-46b6-ad3b-0ae479d1db3e": {
+   "name": "PHÒNG KHÁM CHUYÊN KHOA XÉT NGHIỆM MEDLATEC AN GIANG",
+   "is_general": false,
+   "specialties": []
+  },
+  "f2c8edfe-46c9-4ee3-bff7-e87a17d9cc5b": {
+   "name": "Phòng khám Chuyên khoa Xét nghiệm Medlatec Hải Dương",
+   "is_general": false,
+   "specialties": []
+  },
+  "2c4fb82a-4797-4555-a590-fdd9968b4b68": {
+   "name": "PHÒNG KHÁM CHUYÊN KHOA XÉT NGHIỆM MEDLATEC HÒA BÌNH",
+   "is_general": false,
+   "specialties": []
+  },
+  "bb58ad43-5c6e-4444-a249-4f4773b11081": {
+   "name": "PHÒNG KHÁM CHUYÊN KHOA XÉT NGHIỆM MEDLATEC LẠNG SƠN",
+   "is_general": false,
+   "specialties": []
+  },
+  "210bdcd1-9d4b-4f9f-b1c9-0dc2ec85f18d": {
+   "name": "Phòng khám Chuyên khoa Xét nghiệm MEDLATEC Lào Cai",
+   "is_general": false,
+   "specialties": []
+  },
+  "e364f3fc-d19c-470c-b0cd-d897d75189ad": {
+   "name": "PHÒNG KHÁM CHUYÊN KHOA XÉT NGHIỆM MEDLATEC NINH BÌNH",
+   "is_general": false,
+   "specialties": []
+  },
+  "8d3c8916-31c1-4493-aa0b-74c9040e1c0a": {
+   "name": "PHÒNG KHÁM CHUYÊN KHOA XÉT NGHIỆM MEDLATEC QUẢNG NINH",
+   "is_general": false,
+   "specialties": []
+  },
+  "c79eb94e-e799-42a2-a919-939a6f00c5ed": {
+   "name": "Trung tâm xét nghiệm medlatec hà tĩnh",
+   "is_general": false,
+   "specialties": []
+  },
+  "0e4f4c38-3d66-4db9-b609-480c4fecc4b0": {
+   "name": "Trung tâm xét nghiệm MEDLATEC Nghệ An",
+   "is_general": false,
+   "specialties": []
+  },
+  "44796570-efb9-4496-a812-a666e27f971c": {
+   "name": "Trung tâm xét nghiệm MEDLATEC Thái Nguyên",
+   "is_general": false,
+   "specialties": []
+  },
+  "990eb7da-0458-4e4b-a3df-a0444ac2b09c": {
+   "name": "Viện Pháp y Tâm thần Trung ương Biên Hòa",
+   "exclude": true
+  },
+  "11f387bc-6321-43da-ba88-cfc8cef46670": {
+   "name": "Bệnh viện Nhi đồng 1",
+   "audience": "child"
+  },
+  "b1676f03-ec80-4fcd-bd2b-1efb603812c7": {
+   "name": "Bệnh viện Nhi đồng 2",
+   "audience": "child"
+  },
+  "0ceb133f-9a37-4407-99ad-8e7c7ede1d9d": {
+   "name": "Bệnh viện Nhi đồng Đồng Nai",
+   "audience": "child"
+  },
+  "bd5e4802-5b45-4d16-a3d8-8926c92f12d8": {
+   "name": "Bệnh viện Nhi đồng Thành phố",
+   "audience": "child"
+  },
+  "d55b7430-8d84-4b6a-ba4b-4b21aeacc83d": {
+   "name": "Bệnh viện Nhi đồng thành phố Cần Thơ",
+   "audience": "child"
+  },
+  "4a512f72-6eed-4f50-8ceb-28bda1f6abca": {
+   "name": "Bệnh viện Nhi Hà Nội",
+   "audience": "child"
+  },
+  "f686350e-7c87-4a60-8bbf-7b7b477c467c": {
+   "name": "Bệnh viện Nhi Hải Dương",
+   "audience": "child"
+  },
+  "1226221a-469b-492a-a1c0-47239322a7c4": {
+   "name": "Bệnh viện Nhi Thái Bình",
+   "audience": "child"
+  },
+  "1e4076b3-9293-4e1e-b2f2-42a945595166": {
+   "name": "Bệnh viện Nhi Thanh Hóa",
+   "audience": "child"
+  },
+  "05b4b329-416f-4f0d-8038-251d81880a32": {
+   "name": "Bệnh viện Nhi tỉnh Gia Lai",
+   "audience": "child"
+  },
+  "bc2cc982-2e4c-4f40-9110-a452080d41e7": {
+   "name": "Bệnh viện Trẻ em Hải Phòng",
+   "audience": "child"
+  },
+  "2596f541-4962-406d-ad1a-62407c2b44bc": {
+   "name": "Công Ty Cổ Phần Polyhealthcare- Phòng Khám Nhi Khoa Sunshine",
+   "audience": "child"
+  },
+  "2fba5f6d-a59d-4192-b62c-db74c9b0b656": {
+   "name": "Công Ty Cổ Phần Y Tế Chấn Văn - Phòng Khám Nhi Đồng 315",
+   "audience": "child"
+  },
+  "ca01d0fd-ce1f-43a7-a15d-09500b00faf2": {
+   "name": "Công Ty TNHH Phòng Khám Nhi Sài Gòn - Phú Mỹ",
+   "audience": "child"
+  },
+  "4567771a-a708-4437-8f1e-b352ad16b8bb": {
+   "name": "Trung Tam Phuc Hoi Co Nhi Suy Dinh Duong Da Nang",
+   "audience": "child"
+  },
+  "a101620b-4b8b-45fe-9bbb-c93ad7304604": {
+   "name": "Bệnh viện Sức khỏe tâm thần kinh tỉnh Hưng Yên",
+   "specialties": [
+    "tam_than"
+   ]
+  },
+  "a8070c04-e45c-48a9-96a7-79234a1b6dc9": {
+   "name": "Bệnh viện Tâm thần kinh Pleiku",
+   "specialties": [
+    "tam_than"
+   ]
+  },
+  "14904186-e89a-4b2a-b408-be8e8a3ec770": {
+   "name": "Bệnh viện Tâm thần Thành phố Hồ Chí Minh",
+   "specialties": [
+    "tam_than"
+   ]
+  }
+ }
+}

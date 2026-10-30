@@ -124,6 +124,10 @@ Trả về `{"summary": "3–5 câu…"}`.
 - Đoạn tóm tắt không chẩn đoán, không bàn đổi/ngừng thuốc, không nêu liều. Bản nào vi phạm thì bị chặn, trả `503 unavailable`, và app ẩn ô "Bụt tóm tắt".
 - Cần `ai_chat_version` (đồng ý AI) như `/v1/chat`.
 
+## `POST /v1/facility/suggest`
+
+Gợi ý cơ sở khám theo triệu chứng (KAN-115). Hợp đồng đầy đủ: [`facility-suggest.md`](facility-suggest.md).
+
 ## Đồng ý (consent)
 
 Đọc `user_consents` (cột `user_id`, `ai_chat_version`, `ai_share_profile`) qua PostgREST bằng anon key + token của user. Chỉ cache kết quả **đã đồng ý** (60 giây); chưa đồng ý thì không cache, nên app mở màn đồng ý rồi gửi lại ngay là được.
