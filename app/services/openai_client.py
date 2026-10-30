@@ -248,6 +248,23 @@ async def summarize(transcript: str, prompt_version: str | None = None) -> Sessi
     return _parse(completion, SessionSummary)
 
 
+async def interpret_symptoms(text: str, system_prompt: str, schema) -> tuple[object, Usage]:
+    """Câu gõ tự do → thẻ triệu chứng (`POST /v1/facility/suggest`, bước 1).
+    `system_prompt` đã ghép danh sách thẻ; `schema` có enum key thẻ."""
+    completion = await _with_retry(
+        lambda: get_openai().chat.completions.create(
+            model=settings.openai_model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": fence("symptom_text", text, settings.facility_text_max_chars)},
+            ],
+            response_format=_response_format("symptom_interpretation", schema),
+            **_sampling_params(),
+        )
+    )
+    return _parse(completion, schema), from_completion(completion)
+
+
 async def generate_report(report_data: str, prompt_version: str | None = None) -> tuple[ReportSummary, Usage]:
     """Tóm tắt báo cáo sức khoẻ tháng (`POST /v1/report/monthly`). Một lần
     gọi, không ngữ cảnh hội thoại; `report_data` là số liệu tổng hợp app gửi."""

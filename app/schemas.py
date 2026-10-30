@@ -67,6 +67,36 @@ class V1MonthlyReportRequest(BaseModel):
     locale: str = Field(default="vi", max_length=16)
 
 
+class V1FacilityProfile(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    # Tuổi của hồ sơ ĐANG CHỌN (có thể là người thân), không phải chủ tài khoản.
+    age: int = Field(ge=0, le=120)
+
+
+class V1Location(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+
+
+class V1FacilitySuggestRequest(BaseModel):
+    """Body của `POST /v1/facility/suggest` (KAN-115, docs/facility-suggest.md)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    profile: V1FacilityProfile
+    symptom_tags: list[str] = Field(default_factory=list, max_length=25)
+    # Trần cứng rộng; trần thật (FACILITY_TEXT_MAX_CHARS) kiểm ở endpoint để
+    # trả mã lỗi riêng.
+    text: str | None = Field(default=None, max_length=4000)
+    location: V1Location
+    radius_km: float | None = Field(default=None, gt=0)
+    limit: int | None = Field(default=None, ge=1)
+    clarify_choice: str | None = Field(default=None, max_length=32)
+
+
 class ReportSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

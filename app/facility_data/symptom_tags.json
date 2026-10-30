@@ -1,0 +1,308 @@
+{
+  "source": "lib/data/symptom_tags.dart (KAN-110) — key lưu ở symptom_logs.tags",
+  "groups": {
+    "general": "Toàn thân",
+    "neuro": "Thần kinh",
+    "respiratory": "Hô hấp",
+    "digestive": "Tiêu hóa",
+    "cardioMskSkin": "Tim mạch · Cơ xương khớp · Da"
+  },
+  "tags": [
+    {
+      "key": "fatigue",
+      "name": "Mệt mỏi",
+      "group": "general",
+      "synonyms": [
+        "mệt",
+        "mỏi mệt",
+        "uể oải",
+        "kiệt sức",
+        "đuối sức",
+        "rã rời",
+        "bải hoải"
+      ]
+    },
+    {
+      "key": "fever",
+      "name": "Sốt",
+      "group": "general",
+      "synonyms": [
+        "sốt cao",
+        "sốt nhẹ",
+        "ấm đầu",
+        "nóng sốt"
+      ]
+    },
+    {
+      "key": "chills",
+      "name": "Ớn lạnh",
+      "group": "general",
+      "synonyms": [
+        "ớn rét",
+        "rét run",
+        "lạnh run",
+        "run lạnh"
+      ]
+    },
+    {
+      "key": "appetite_loss",
+      "name": "Chán ăn",
+      "group": "general",
+      "synonyms": [
+        "biếng ăn",
+        "ăn không ngon",
+        "không muốn ăn",
+        "ăn kém"
+      ]
+    },
+    {
+      "key": "weight_loss",
+      "name": "Sụt cân",
+      "group": "general",
+      "synonyms": [
+        "sút cân",
+        "xuống cân",
+        "gầy sút"
+      ]
+    },
+    {
+      "key": "headache",
+      "name": "Đau đầu",
+      "group": "neuro",
+      "synonyms": [
+        "nhức đầu",
+        "đau nửa đầu",
+        "nhức nửa đầu",
+        "căng đầu",
+        "nặng đầu",
+        "đau thái dương",
+        "đau búa bổ"
+      ]
+    },
+    {
+      "key": "dizziness",
+      "name": "Chóng mặt",
+      "group": "neuro",
+      "synonyms": [
+        "váng đầu",
+        "hoa mắt",
+        "choáng",
+        "choáng váng",
+        "xây xẩm",
+        "quay cuồng",
+        "tiền đình",
+        "lâng lâng"
+      ]
+    },
+    {
+      "key": "insomnia",
+      "name": "Mất ngủ",
+      "group": "neuro",
+      "synonyms": [
+        "khó ngủ",
+        "không ngủ được",
+        "trằn trọc",
+        "ngủ không ngon",
+        "ngủ chập chờn"
+      ]
+    },
+    {
+      "key": "numbness",
+      "name": "Tê bì tay chân",
+      "group": "neuro",
+      "synonyms": [
+        "tê bì",
+        "tê tay",
+        "tê chân",
+        "tê tay chân",
+        "châm chích",
+        "kiến bò"
+      ]
+    },
+    {
+      "key": "forgetful",
+      "name": "Hay quên",
+      "group": "neuro",
+      "synonyms": [
+        "đãng trí",
+        "giảm trí nhớ",
+        "trí nhớ kém",
+        "lú lẫn"
+      ]
+    },
+    {
+      "key": "cough",
+      "name": "Ho",
+      "group": "respiratory",
+      "synonyms": [
+        "ho khan",
+        "ho có đờm",
+        "ho đờm",
+        "ho dai dẳng"
+      ]
+    },
+    {
+      "key": "dyspnea",
+      "name": "Khó thở",
+      "group": "respiratory",
+      "synonyms": [
+        "hụt hơi",
+        "thở dốc",
+        "tức thở",
+        "thở gấp",
+        "ngộp thở",
+        "thở không nổi"
+      ]
+    },
+    {
+      "key": "sore_throat",
+      "name": "Đau họng",
+      "group": "respiratory",
+      "synonyms": [
+        "rát họng",
+        "viêm họng",
+        "ngứa họng",
+        "vướng họng",
+        "nuốt đau"
+      ]
+    },
+    {
+      "key": "stuffy_nose",
+      "name": "Nghẹt mũi",
+      "group": "respiratory",
+      "synonyms": [
+        "ngạt mũi",
+        "tắc mũi",
+        "sổ mũi",
+        "chảy nước mũi",
+        "sụt sịt"
+      ]
+    },
+    {
+      "key": "hoarse",
+      "name": "Khàn tiếng",
+      "group": "respiratory",
+      "synonyms": [
+        "khản tiếng",
+        "khàn giọng",
+        "khản giọng",
+        "mất tiếng"
+      ]
+    },
+    {
+      "key": "abdominal_pain",
+      "name": "Đau bụng",
+      "group": "digestive",
+      "synonyms": [
+        "đau quặn bụng",
+        "quặn bụng",
+        "đau dạ dày",
+        "đau bao tử",
+        "đau thượng vị"
+      ]
+    },
+    {
+      "key": "nausea",
+      "name": "Buồn nôn",
+      "group": "digestive",
+      "synonyms": [
+        "nôn",
+        "ói",
+        "nôn ói",
+        "muốn ói",
+        "nôn mửa",
+        "lợm giọng"
+      ]
+    },
+    {
+      "key": "diarrhea",
+      "name": "Tiêu chảy",
+      "group": "digestive",
+      "synonyms": [
+        "tháo dạ",
+        "đi lỏng",
+        "phân lỏng"
+      ]
+    },
+    {
+      "key": "constipation",
+      "name": "Táo bón",
+      "group": "digestive",
+      "synonyms": [
+        "khó đi ngoài",
+        "đi ngoài khó"
+      ]
+    },
+    {
+      "key": "bloating",
+      "name": "Đầy hơi",
+      "group": "digestive",
+      "synonyms": [
+        "chướng bụng",
+        "đầy bụng",
+        "khó tiêu",
+        "ợ hơi",
+        "ậm ạch"
+      ]
+    },
+    {
+      "key": "palpitations",
+      "name": "Hồi hộp",
+      "group": "cardioMskSkin",
+      "synonyms": [
+        "tim đập nhanh",
+        "đánh trống ngực",
+        "trống ngực",
+        "tim đập mạnh"
+      ]
+    },
+    {
+      "key": "chest_pain",
+      "name": "Đau ngực",
+      "group": "cardioMskSkin",
+      "synonyms": [
+        "tức ngực",
+        "nặng ngực",
+        "thắt ngực",
+        "nhói ngực",
+        "đau thắt ngực"
+      ]
+    },
+    {
+      "key": "joint_pain",
+      "name": "Đau khớp",
+      "group": "cardioMskSkin",
+      "synonyms": [
+        "nhức khớp",
+        "sưng khớp",
+        "cứng khớp",
+        "đau gối",
+        "đau đầu gối"
+      ]
+    },
+    {
+      "key": "back_pain",
+      "name": "Đau lưng",
+      "group": "cardioMskSkin",
+      "synonyms": [
+        "mỏi lưng",
+        "nhức lưng",
+        "đau thắt lưng",
+        "đau cột sống"
+      ]
+    },
+    {
+      "key": "rash",
+      "name": "Phát ban",
+      "group": "cardioMskSkin",
+      "synonyms": [
+        "nổi mẩn",
+        "mẩn ngứa",
+        "nổi mề đay",
+        "mề đay",
+        "nổi ban",
+        "ngứa da"
+      ]
+    }
+  ]
+}

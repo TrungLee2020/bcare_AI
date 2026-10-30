@@ -200,6 +200,24 @@ class Settings(BaseSettings):
     report_input_max_chars: int = 6000
     report_summary_max_chars: int = 1200
 
+    # /v1/facility/suggest (KAN-115)
+    facility_prompt_version: str = "v1"
+    facility_table: str = "facilities"
+    # Bật khi cột facilities.audience đã có trên DB (child / adult / all).
+    facility_audience_column: bool = False
+    # Hỏi max(updated_at) mỗi ngần này giây; đổi thì kéo lại cả bảng.
+    facility_refresh_seconds: int = 600
+    facility_max_per_day: int = 30
+    facility_text_max_chars: int = 500
+    facility_default_radius_km: float = 10.0
+    facility_max_radius_km: float = 50.0
+    facility_default_limit: int = 10
+    facility_max_limit: int = 30
+    facility_emergency_count: int = 3
+    # Cache kết quả đọc câu gõ (theo hash câu, không kèm user): trả lời câu hỏi
+    # làm rõ hay nới bán kính không phải gọi model lại.
+    facility_interpret_cache_seconds: int = 24 * 3600
+
     # Rollout dần
     rollout_enabled: bool = True
     # % user được bật, chia theo hash của user_id. 0 = chỉ allowlist.

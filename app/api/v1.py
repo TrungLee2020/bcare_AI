@@ -12,6 +12,8 @@ là đường dự phòng nếu response consumer chậm hoặc chết.
 `POST /v1/report/monthly` — tóm tắt báo cáo sức khoẻ tháng, gọi OpenAI trực
 tiếp (một lần, không ngữ cảnh), cache theo nội dung số liệu.
 
+`POST /v1/facility/suggest` — gợi ý cơ sở khám theo triệu chứng (KAN-115).
+
 Lỗi luôn có dạng `{"error": <mã>, "message": <câu hiển thị được>}`:
   401 unauthorized        — token hỏng/hết hạn: app đăng nhập lại.
   403 consent_required    — chưa đồng ý dùng Trợ lý AI: app hiện màn đồng ý.
@@ -44,9 +46,12 @@ from app.schemas import (
     ChatRequestMessage,
     ChatResponseMessage,
     V1ChatRequest,
+    V1FacilitySuggestRequest,
     V1MonthlyReportRequest,
 )
 from app.services import consent, cost, idempotency, openai_client, output_validator, quota, rollout, smalltalk
+from app.services.facility import facilities
+from app.services.facility import suggest as facility_suggest_service
 from app.sse import hub
 
 logger = logging.getLogger(__name__)
@@ -481,3 +486,44 @@ async def monthly_report(payload: V1MonthlyReportRequest, request: Request):
 
     await redis.set(cache_key, summary, ex=settings.report_cache_seconds)
     return {"summary": summary}
+
+
+@router.post("/facility/suggest")
+async def facility_suggest(payload: V1FacilitySuggestRequest, request: Request):
+    """Gợi ý cơ sở khám theo triệu chứng (KAN-115, docs/facility-suggest.md).
+    Không trừ lượt chat; trần riêng FACILITY_MAX_PER_DAY lượt/ngày."""
+    principal = await _principal(request)
+    metrics.incr("v1_facility_requests")
+    await _gate(principal, request)
+
+    redis = get_redis()
+    counter = f"facility_count:{principal.user_id}:{_today()}"
+    used = await redis.incr(counter)
+    if used == 1:
+        await redis.expire(counter, quota.seconds_until_midnight())
+    if used > settings.facility_max_per_day:
+        await redis.decr(counter)
+        raise V1Error(
+            429, "rate_limited", "Bạn đã tìm nơi khám nhiều lần hôm nay, vui lòng thử lại vào ngày mai.",
+            retry_after=quota.seconds_until_midnight(),
+        )
+
+    try:
+        return await facility_suggest_service.suggest(
+            redis,
+            age=payload.profile.age,
+            symptom_tags=payload.symptom_tags,
+            text=payload.text,
+            lat=payload.location.lat,
+            lng=payload.location.lng,
+            radius_km=payload.radius_km,
+            limit=payload.limit,
+            clarify_choice=payload.clarify_choice,
+        )
+    except facility_suggest_service.InvalidRequest as exc:
+        await redis.decr(counter)
+        raise V1Error(422, "invalid_request", str(exc)) from exc
+    except facilities.FacilitiesUnavailable as exc:
+        await redis.decr(counter)
+        metrics.incr("v1_facility_unavailable")
+        raise V1Error(503, "unavailable", "Chưa tải được danh sách cơ sở khám, bạn thử lại sau nhé.") from exc
