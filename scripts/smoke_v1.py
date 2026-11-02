@@ -102,6 +102,24 @@ def main() -> None:
             check("giữ conversation_id", done.get("conversation_id") == conversation_id,
                   f"should_see_doctor={done.get('should_see_doctor')} follow_ups={len(done.get('follow_up_questions') or [])}")
 
+        # 2b. Lịch sử: hai lượt vừa hỏi phải đọc lại được. Consumer ghi lịch sử
+        # SAU khi trả lời nên chờ thêm chút.
+        auth_header = {"Authorization": f"Bearer {token}"}
+        messages = []
+        for _ in range(10):
+            resp = client.get(f"{BASE}/v1/conversations/{conversation_id}/messages", headers=auth_header)
+            messages = resp.json().get("messages", []) if resp.status_code == 200 else []
+            if len(messages) >= 4:
+                break
+            time.sleep(0.5)
+        check("lịch sử tin nhắn", [m["role"] for m in messages] == ["user", "assistant"] * 2,
+              f"HTTP {resp.status_code} n={len(messages)} error={resp.json().get('error') if resp.status_code != 200 else None}")
+        resp = client.get(f"{BASE}/v1/conversations", params={"limit": 5}, headers=auth_header)
+        listed = [c["conversation_id"] for c in resp.json().get("conversations", [])] if resp.status_code == 200 else []
+        check("danh sách hội thoại", listed[:1] == [conversation_id], f"HTTP {resp.status_code} n={len(listed)}")
+        resp = client.get(f"{BASE}/v1/conversations/{uuid.uuid4()}/messages", headers=auth_header)
+        check("hội thoại lạ 404", resp.status_code == 404 and resp.json().get("error") == "not_found", f"HTTP {resp.status_code}")
+
         # 3. Gửi lại cùng Idempotency-Key: cùng câu trả lời, không tính thêm
         key = {"Idempotency-Key": f"smoke-{uuid.uuid4()}"}
         first, _ = chat_json(client, token, "Uống nhiều nước có giúp đỡ đau đầu không?", headers=key)

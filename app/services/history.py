@@ -65,4 +65,9 @@ async def record_turn(
                 "detail": response.detail,
             },
         )
+
+    # Transaction riêng: lượt hỏi-đáp phải commit ngay để app đọc lịch sử thấy
+    # luôn, không chờ lần gọi OpenAI để tóm tắt (vài giây), và không giữ
+    # connection DB trong lúc chờ OpenAI. Tóm tắt lỗi thì lượt vẫn còn.
+    async with db_session() as db:
         await summarizer.maybe_summarize(db, message.session_id)
