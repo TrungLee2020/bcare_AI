@@ -11,6 +11,9 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir --requirement requirements.txt
 
 COPY app ./app
+# Migration DB: service `migrate` trong docker-compose chạy `alembic upgrade head`.
+COPY alembic.ini ./
+COPY db/alembic ./db/alembic
 COPY prompts ./prompts
 COPY scripts ./scripts
 

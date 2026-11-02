@@ -8,7 +8,7 @@ name: bcare-ai
 
 services:
   app:
-    build:
+    build: &app-build
       context: .
       dockerfile: Dockerfile
     env_file:
@@ -18,14 +18,14 @@ services:
       # REDIS_PASSWORD/POSTGRES_PASSWORD nằm trong URL: chỉ dùng ký tự an toàn
       # cho URL (vd `openssl rand -hex 32`).
       REDIS_URL: redis://:${REDIS_PASSWORD:?Đặt REDIS_PASSWORD trong .env}@redis:6379/0
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-bcare}:${POSTGRES_PASSWORD:?Đặt POSTGRES_PASSWORD trong .env}@postgres:5432/${POSTGRES_DB:-bcare}
+      DATABASE_URL: &database-url postgresql+asyncpg://${POSTGRES_USER:-bcare}:${POSTGRES_PASSWORD:?Đặt POSTGRES_PASSWORD trong .env}@postgres:5432/${POSTGRES_DB:-bcare}
     ports:
       # Mặc định chỉ bind 127.0.0.1: hệ thống ngoài nên vào qua reverse proxy
       # có TLS (nginx/LB) trên cùng host. Đặt APP_BIND=0.0.0.0 chỉ khi đã có
       # lớp TLS khác phía trước.
       - "${APP_BIND:-127.0.0.1}:${APP_PORT:-8000}:8000"
     depends_on:
-      postgres-init:
+      migrate:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -52,19 +52,16 @@ services:
       retries: 10
     restart: unless-stopped
 
-  postgres-init:
-    image: postgres:16-alpine
+  # Mỗi lần `docker compose up`: áp các revision Alembic còn thiếu (db/alembic)
+  # rồi mới bật app. Đã ở head thì không làm gì. Lỗi thì app không khởi động:
+  # xem `docker compose logs migrate`.
+  migrate:
+    build: *app-build
+    env_file:
+      - .env
     environment:
-      PGPASSWORD: ${POSTGRES_PASSWORD:?Đặt POSTGRES_PASSWORD trong .env}
-    volumes:
-      - ./db/schema.sql:/schema.sql:ro
-    command:
-      - psql
-      - --host=postgres
-      - --username=${POSTGRES_USER:-bcare}
-      - --dbname=${POSTGRES_DB:-bcare}
-      - --set=ON_ERROR_STOP=1
-      - --file=/schema.sql
+      DATABASE_URL: *database-url
+    command: ["alembic", "upgrade", "head"]
     depends_on:
       postgres:
         condition: service_healthy
