@@ -61,8 +61,9 @@ def specialty_label(key: str) -> str:
     return specialties()[key]
 
 
-def age_group(age: int) -> str:
-    return "child" if age <= CHILD_MAX_AGE else "adult"
+def age_group(age: int | None) -> str:
+    """None = người lớn chưa rõ tuổi."""
+    return "child" if age is not None and age <= CHILD_MAX_AGE else "adult"
 
 
 @dataclass

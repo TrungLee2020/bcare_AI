@@ -375,6 +375,22 @@
         "mat ngu keo dai",
         "suc khoe tinh than"
       ]
+    },
+    {
+      "key": "truyen_nhiem",
+      "label": "Truyền nhiễm – Nhiệt đới",
+      "group": "noi",
+      "group_label": "Nội khoa",
+      "typical_symptoms": [
+        "Sốt cao kéo dài",
+        "nghi sốt xuất huyết",
+        "bệnh truyền nhiễm"
+      ],
+      "search_keywords_unaccented": [
+        "truyen nhiem",
+        "nhiet doi",
+        "sot xuat huyet"
+      ]
     }
   ],
   "emergency": {

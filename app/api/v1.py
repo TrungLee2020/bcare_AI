@@ -491,22 +491,26 @@ async def monthly_report(payload: V1MonthlyReportRequest, request: Request):
 @router.post("/facility/suggest")
 async def facility_suggest(payload: V1FacilitySuggestRequest, request: Request):
     """Gợi ý cơ sở khám theo triệu chứng (KAN-115, docs/facility-suggest.md).
-    Không trừ lượt chat; trần riêng FACILITY_MAX_PER_DAY lượt/ngày."""
+    Không trừ lượt chat. Trần riêng FACILITY_MAX_PER_DAY chỉ tính những lần
+    đọc câu gõ bằng model; lượt chỉ có thẻ hay dùng lại kết quả đã cache thì
+    không tính."""
     principal = await _principal(request)
     metrics.incr("v1_facility_requests")
     await _gate(principal, request)
 
     redis = get_redis()
     counter = f"facility_count:{principal.user_id}:{_today()}"
-    used = await redis.incr(counter)
-    if used == 1:
-        await redis.expire(counter, quota.seconds_until_midnight())
-    if used > settings.facility_max_per_day:
+
+    async def charge() -> None:
+        used = await redis.incr(counter)
+        if used == 1:
+            await redis.expire(counter, quota.seconds_until_midnight())
+        if used > settings.facility_max_per_day:
+            await redis.decr(counter)
+            raise facility_suggest_service.LimitReached
+
+    async def refund() -> None:
         await redis.decr(counter)
-        raise V1Error(
-            429, "rate_limited", "Bạn đã tìm nơi khám nhiều lần hôm nay, vui lòng thử lại vào ngày mai.",
-            retry_after=quota.seconds_until_midnight(),
-        )
 
     try:
         return await facility_suggest_service.suggest(
@@ -519,11 +523,17 @@ async def facility_suggest(payload: V1FacilitySuggestRequest, request: Request):
             radius_km=payload.radius_km,
             limit=payload.limit,
             clarify_choice=payload.clarify_choice,
+            charge=charge,
+            refund=refund,
         )
     except facility_suggest_service.InvalidRequest as exc:
-        await redis.decr(counter)
         raise V1Error(422, "invalid_request", str(exc)) from exc
+    except facility_suggest_service.LimitReached as exc:
+        raise V1Error(
+            429, "rate_limited", "Bạn đã tìm nơi khám bằng mô tả nhiều lần hôm nay, vui lòng chọn thẻ triệu chứng "
+            "hoặc thử lại vào ngày mai.",
+            retry_after=quota.seconds_until_midnight(),
+        ) from exc
     except facilities.FacilitiesUnavailable as exc:
-        await redis.decr(counter)
         metrics.incr("v1_facility_unavailable")
         raise V1Error(503, "unavailable", "Chưa tải được danh sách cơ sở khám, bạn thử lại sau nhé.") from exc

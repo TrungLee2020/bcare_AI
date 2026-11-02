@@ -1,20 +1,26 @@
 {
- "note": "Sửa tạm dữ liệu facilities cho tới khi DB được sửa (KAN-115, facility_data_issues.json ngày 2026-10-29). Khoá là facilities.id; trường nào có ở đây thì đè lên giá trị đọc từ DB. specialties của 43 dòng is_general sai suy từ tên cơ sở; [] = chưa có key phù hợp (Nhiệt đới, Lão khoa, PHCN, MEDLATEC) nên cơ sở bị ẩn. Xoá dòng khi DB đã sửa.",
+ "note": "Sửa tạm dữ liệu facilities cho tới khi DB được sửa (KAN-115, facility_data_issues.json ngày 2026-10-29). Khoá là facilities.id; trường nào có ở đây thì đè lên giá trị đọc từ DB. specialties của 43 dòng is_general sai suy từ tên cơ sở; [] = chưa có key phù hợp (Lão khoa, PHCN, MEDLATEC) nên cơ sở bị ẩn. Chỉ áp dụng khi FACILITY_AUDIENCE_COLUMN=false: migration 20261102000000_facility_audience_and_fixes.sql của team App sửa đúng các dòng này, chạy xong thì bật cờ và DB là nguồn đúng.",
  "overrides": {
   "b5bef611-0111-40a4-a127-d5ddd3522482": {
    "name": "Bệnh viện Bệnh Nhiệt đới",
    "is_general": false,
-   "specialties": []
+   "specialties": [
+    "truyen_nhiem"
+   ]
   },
   "9d503159-d61e-4136-8d97-fafa01e41bfe": {
    "name": "Bệnh viện Bệnh Nhiệt đới Trung ương",
    "is_general": false,
-   "specialties": []
+   "specialties": [
+    "truyen_nhiem"
+   ]
   },
   "30282710-3793-4149-88eb-a16086d9bd10": {
    "name": "Bệnh viện Bệnh nhiệt đới Trung ương (cơ sở 2)",
    "is_general": false,
-   "specialties": []
+   "specialties": [
+    "truyen_nhiem"
+   ]
   },
   "0f4964a2-2663-4f66-8a62-8c13e9740c8e": {
    "name": "Bệnh viện Da liễu Trung ương",
@@ -31,7 +37,8 @@
   "25318ab3-87b1-4526-8c51-24b605b05412": {
    "name": "Bệnh viện Lão khoa Trung ương",
    "is_general": false,
-   "specialties": []
+   "specialties": [],
+   "audience": "adult"
   },
   "b185ce0d-22c7-47ee-a330-b971c772720d": {
    "name": "Bệnh viện Mắt Trung ương",

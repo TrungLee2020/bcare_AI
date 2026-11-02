@@ -1,6 +1,6 @@
 # Gợi ý cơ sở khám theo triệu chứng (`/v1/facility/suggest`) — KAN-115
 
-**Trạng thái (2026-10-30):** đã code trên nhánh `feat/v1-app-api`, chưa deploy. Cần team App duyệt hợp đồng (mục 2–4) và Product chốt các câu ở mục 7; chỗ nào chưa chốt thì service đang chạy theo đề xuất ghi ở đó.
+**Trạng thái (2026-11-02):** team App đã duyệt hợp đồng (mục 2–4) và làm xong mục 8; client nằm sau cờ `FACILITY_AI` của app. Chờ migration `20261102000000_facility_audience_and_fixes.sql` chạy trên production rồi bật `FACILITY_AUDIENCE_COLUMN=true`. Product còn chốt các câu ở mục 7; chỗ nào chưa chốt thì service đang chạy theo đề xuất ghi ở đó.
 
 Code: [`app/services/facility/`](../app/services/facility/), endpoint trong [`app/api/v1.py`](../app/api/v1.py), prompt [`prompts/facility_v1.md`](../prompts/facility_v1.md), dữ liệu [`app/facility_data/`](../app/facility_data/), test [`tests/test_facility.py`](../tests/test_facility.py).
 
@@ -46,13 +46,14 @@ Mỗi triệu chứng LLM trả về phải kèm đoạn chữ nguyên văn củ
 
 | Trường | Bắt buộc | Ý nghĩa |
 |---|---|---|
-| `profile.age` | Có | Tuổi của **hồ sơ đang chọn** (không phải chủ tài khoản), số nguyên 0–120. `≤ 16` là trẻ em. Không gửi ngày sinh, tên. |
+| `profile.age` | Có | Tuổi của **hồ sơ đang chọn** (không phải chủ tài khoản), số nguyên 0–120. `≤ 16` là trẻ em. `null` = người lớn chưa rõ tuổi (tính như người lớn). Không gửi ngày sinh, tên. |
 | `symptom_tags` | Một trong hai | Key trong `symptom_tags.json`. Key lạ → `422`. |
 | `text` | Một trong hai | Câu gõ tự do, tối đa 500 ký tự. |
 | `location` | Có | Toạ độ đã làm tròn. |
 | `radius_km` | Không | Mặc định 10, tối đa 50. |
 | `limit` | Không | Mặc định 10, tối đa 30. |
-| `clarify_choice` | Không | Gửi lại khi trả lời câu hỏi làm rõ (mục 3.3): `value` của lựa chọn người dùng bấm, kèm nguyên request cũ. Nhận key chuyên khoa trong `specialties.json` hoặc `general_only`; giá trị khác → `422`. Kết quả đọc câu gõ được cache 24 giờ theo nội dung câu, nên lượt này thường không gọi lại model. |
+| `locale` | Không | Nhận và bỏ qua: hiện `reason`, `message`, `note`, nhãn chuyên khoa luôn bằng tiếng Việt, giống `/v1/chat`. Trường lạ nói chung không gây `422`. |
+| `clarify_choice` | Không | Gửi lại khi trả lời câu hỏi làm rõ (mục 3.3): `value` của lựa chọn người dùng bấm, kèm nguyên request cũ. Nhận key chuyên khoa trong `specialties.json` hoặc `general_only`; giá trị khác → `422`. Kết quả đọc câu gõ được cache 24 giờ theo nội dung câu, nên lượt này thường không gọi lại model. Gửi kèm `radius_km` được. |
 
 ## 3. Response
 
@@ -119,7 +120,7 @@ Mọi response có `interpretation` và `data_version` (`max(updated_at)` của 
 - `match`: `primary` → `secondary` → `pediatric` (chỉ với trẻ em: cơ sở Nhi không có đúng khoa) → `general`. Thứ tự hiển thị đúng như mảng trả về.
 - `audience`: `child` | `adult` | `all`.
 - `reason` là câu tiếng Việt sinh từ dữ liệu, app hiện nguyên văn.
-- `id` để ghép ghim bản đồ và nút chỉ đường.
+- `id` là `facilities.id` (uuid) của chính bảng app đang đồng bộ, để ghép ghim bản đồ và nút chỉ đường.
 
 ### 3.2 `empty`
 
@@ -179,7 +180,7 @@ Có dấu hiệu cấp cứu (`red_flag` trong bảng map, hoặc nhóm `dot_quy
 ```
 
 - `kind`: `stroke` | `chest_pain` | `breathing` | `head_injury`. Cả 4 loại đang bật; `chest_pain`, `breathing`, `head_injury` chờ Product xác nhận (mục 7).
-- `facilities`: 3 cơ sở đa khoa gần nhất hợp đối tượng, không giới hạn bán kính. DB chưa có cột "có cấp cứu", nên đây là gần đúng.
+- `facilities`: 3 cơ sở đa khoa gần nhất hợp đối tượng, không giới hạn bán kính. Mỗi cơ sở có đủ trường như ở `ok` (luôn có `id`, `lat`, `lng`), nên app chỉ đường được cả khi máy chưa có cơ sở đó. DB chưa có cột "có cấp cứu", nên đây là gần đúng.
 
 ## 4. Lọc và xếp hạng
 
@@ -187,15 +188,15 @@ Có dấu hiệu cấp cứu (`red_flag` trong bảng map, hoặc nhóm `dot_quy
 - Cơ sở chưa gắn gì: `is_general = false` và `specialties` rỗng (400 dòng).
 - Viện Pháp y Tâm thần.
 
-**Sửa tạm** theo [`app/facility_data/facility_overrides.json`](../app/facility_data/facility_overrides.json) (dựng từ `facility_data_issues.json`) **cho tới khi DB được sửa**:
-- 43 dòng `is_general` sai: bỏ cờ đa khoa, gán khoa suy từ tên (Nhi TW → `nhi`, Mắt TW → `mat`, Tâm thần TW → `tam_than`…). Nhiệt đới, Lão khoa, Phục hồi chức năng, MEDLATEC chưa có key phù hợp nên bị ẩn.
+**Sửa tạm** theo [`app/facility_data/facility_overrides.json`](../app/facility_data/facility_overrides.json) (dựng từ `facility_data_issues.json`), **chỉ khi `FACILITY_AUDIENCE_COLUMN=false`**. Bật cờ (sau khi migration của team App chạy) thì DB là nguồn đúng và danh sách này không còn dùng:
+- 43 dòng `is_general` sai: bỏ cờ đa khoa, gán khoa suy từ tên (Nhi TW → `nhi`, Mắt TW → `mat`, Tâm thần TW → `tam_than`, Nhiệt đới → `truyen_nhiem`…). Lão khoa, Phục hồi chức năng, MEDLATEC không có key nên bị ẩn.
 - 3 BV Tâm thần: bỏ tag `than_kinh`.
 - 17 cơ sở chỉ khám trẻ em: `audience = child`.
 
-Thêm vài luật theo tên làm lưới an toàn cho dòng chưa có trong danh sách trên. Luật nào cũng chỉ bớt chỗ cơ sở có thể xuất hiện, không bao giờ thêm:
+Thêm vài luật theo tên làm lưới an toàn cho dòng chưa có trong danh sách trên. Luật nào cũng chỉ bớt chỗ cơ sở có thể xuất hiện, không bao giờ thêm, và vẫn chạy sau khi bật cờ (trừ luật đối tượng, xem dưới):
 - tên có "tâm thần" → bỏ `than_kinh`, thêm `tam_than`, bỏ cờ đa khoa;
-- tên có "xét nghiệm" → bỏ cờ đa khoa;
-- tên có "nhi" hoặc "trẻ em" mà không có "sản" → `audience = child` (so khớp có dấu, nên "Nhị" không bị tính);
+- tên có "xét nghiệm", "tiêm phòng" hoặc "dự phòng" → bỏ cờ đa khoa;
+- chỉ khi cờ tắt: tên có "nhi" hoặc "trẻ em" mà không có "sản" → `audience = child` (so khớp có dấu, nên "Nhị" không bị tính). Bật cờ thì dùng `audience` của DB;
 - tên có "pháp y" → ẩn.
 
 **Lọc cứng**, giữ cơ sở thoả **đồng thời**:
@@ -205,6 +206,7 @@ Thêm vài luật theo tên làm lưới an toàn cho dòng chưa có trong danh
 
 **Xếp hạng**:
 - Người lớn: `primary` → `secondary` → `general`; cùng nhóm thì gần hơn trước.
+- Triệu chứng mà bảng map trỏ thẳng tới đa khoa (`primary: ["da_khoa"]`, vd. sốt ở người lớn) thì cơ sở đa khoa đứng **cùng hạng** chuyên khoa chính, với `reason` dạng "Sốt → Đa khoa". Ví dụ sốt ở người lớn: đa khoa gần trước, BV Nhiệt đới (`truyen_nhiem`, phụ) sau.
 - Trẻ em: cơ sở Nhi (`audience = child` hoặc có tag `nhi`) có đúng khoa → khoa đúng ở nơi khác → cơ sở Nhi bất kỳ → đa khoa; cùng nhóm thì gần hơn trước.
 
 **Bối cảnh trong câu gõ** (LLM đọc, code áp dụng):
@@ -228,7 +230,8 @@ GET /rest/v1/facilities?select=id,name,lat,lng,brand_kind,specialties,is_general
 
 ## 6. Hạn mức và quyền riêng tư
 
-- **Không trừ lượt chat.** Giới hạn riêng `FACILITY_MAX_PER_DAY` (mặc định 30) lượt/ngày/user, tính mọi lượt hợp lệ (`429 rate_limited`). Lượt chỉ có thẻ (không `text`) không gọi LLM.
+- **Không trừ lượt chat.** Giới hạn riêng `FACILITY_MAX_PER_DAY` (mặc định 30) mỗi ngày mỗi user, **chỉ tính những lần đọc câu gõ bằng model**. Lượt chỉ có thẻ, lượt gửi lại cùng câu (nới bán kính, trả lời câu hỏi làm rõ, dùng kết quả đã cache) và lượt model lỗi đều không tính. Hết lượt → `429 rate_limited`; app vẫn tìm được bằng thẻ.
+- **Thời gian:** bước gọi model có trần `FACILITY_LLM_BUDGET_SECONDS` (mặc định 15 giây, gồm cả retry). Quá trần thì gợi ý theo thẻ / đa khoa kèm `note`, từ khoá cấp cứu vẫn chạy. Đo 2026-11-02 với `gpt-5-nano` (12 câu, máy dev): trung vị 2,5 giây, chậm nhất 4,7 giây. Lượt chỉ có thẻ không gọi model, dưới 1 giây khi bảng cơ sở đã cache. App chờ 30 giây là đủ.
 - Không lưu và không log toạ độ. Kết quả đọc câu gõ (thẻ + cờ, không phải nguyên câu) được cache 24 giờ trong Redis theo hash của câu, không kèm user id. Log chỉ có cụm từ chưa map (mục 4) và số liệu tổng trên `/metrics` (`facility_ok`, `facility_empty`, `facility_clarify`, `facility_emergency_*`, `facility_unmapped`…).
 - `text` đi qua bộ lọc đầu vào như `/v1/chat` (chặn prompt injection).
 
@@ -249,8 +252,10 @@ Từ đối chiếu với bảng mapping tham khảo trong ticket:
 
 ## 8. Cần team App / data làm
 
-1. Thêm cột `facilities.audience` (`child` / `adult` / `all`), sửa 43 dòng `is_general`, bỏ `than_kinh` ở 3 BV Tâm thần, theo `facility_data_issues.json`.
-2. Sau khi sửa, các BV Nhiệt đới, Lão khoa, Phục hồi chức năng, điểm xét nghiệm MEDLATEC sẽ không còn khoa nào và bị ẩn. Cần quyết: thêm key (vd. `truyen_nhiem` cho Nhiệt đới, đi cùng `fever` ở bảng map) hay chấp nhận ẩn. Viện Pháp y Tâm thần nên `is_active = false`.
-3. Đổi nhãn `than_kinh` thành "Nội thần kinh" trong app.
-4. Thêm "Tìm cho: Tôi / Trẻ em (nhập tuổi)" và gửi `profile.age` theo lựa chọn đó.
-5. Kiểm thêm các dòng đang gắn đa khoa mà tên cho thấy không phải, gặp khi chạy thử trên dữ liệu thật quanh Q1: "Trung Tâm Y Tế Dự Phòng - Phòng Khám Tiêm Phòng" (điểm tiêm phòng), "Bệnh viện Bình Dân" (BV ngoại khoa / tiết niệu).
+Team App đã làm xong (2026-11-02):
+
+1. Migration `20261102000000_facility_audience_and_fixes.sql`: cột `audience` (mặc định `all`), 17 cơ sở `child`, 4 BV Lão khoa `adult`, sửa 43 dòng `is_general`, bỏ `than_kinh` ở 3 BV Tâm thần. **Chưa chạy trên production**; Hiếu chạy xong thì bên AI đặt `FACILITY_AUDIENCE_COLUMN=true` và khởi động lại app.
+2. Key mới `truyen_nhiem` ("Truyền nhiễm – Nhiệt đới") cho 6 BV Nhiệt đới / Truyền nhiễm; bên AI đã thêm làm chuyên khoa phụ của `fever` ở người lớn. Chấp nhận ẩn: Lão khoa, Phục hồi chức năng, Điều dưỡng, điểm xét nghiệm, điểm tiêm phòng, y tế dự phòng, BV Thận Hà Nội, Viện Huyết học. Viện Pháp y Tâm thần `is_active = false`.
+3. Nhãn `than_kinh` là "Nội thần kinh" trong app.
+4. "Tìm cho: Tôi / Trẻ em": "Tôi" gửi tuổi từ hồ sơ, "Trẻ em" nhập 0–16, không lưu.
+5. Điểm tiêm phòng ẩn; BV Bình Dân `is_general=false`, `specialties=['ngoai_tong_quat']`.

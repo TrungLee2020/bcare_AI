@@ -6,8 +6,8 @@ Bảng cơ sở khám (Supabase `facilities`), cache trong bộ nhớ.
 chưa từng có bản nào thì báo FacilitiesUnavailable (503).
 
 Dữ liệu DB còn sai (KAN-115, facility_data_issues.json), nên mỗi dòng đi qua
-`clean()` trước khi dùng: sửa theo facility_overrides.json, rồi vài luật theo
-tên làm lưới an toàn. Luật nào cũng chỉ được BỚT chỗ cơ sở có thể xuất hiện,
+`clean()` trước khi dùng: sửa theo facility_overrides.json (cho tới khi
+migration của team App chạy), rồi vài luật theo tên làm lưới an toàn. Luật nào cũng chỉ được BỚT chỗ cơ sở có thể xuất hiện,
 không bao giờ thêm — thà thiếu còn hơn sai.
 """
 
@@ -63,8 +63,13 @@ def _has(words: list[str], phrase: str) -> bool:
 
 
 def clean(row: dict) -> Facility | None:
-    """Một dòng DB → Facility đã sửa, hoặc None nếu không được gợi ý."""
-    fix = catalog.overrides().get(str(row.get("id")), {})
+    """Một dòng DB → Facility đã sửa, hoặc None nếu không được gợi ý.
+
+    Có cột audience (FACILITY_AUDIENCE_COLUMN) nghĩa là migration sửa dữ liệu
+    của team App đã chạy: DB là nguồn đúng, bỏ danh sách sửa tạm và luật đoán
+    đối tượng theo tên. Các luật theo tên còn lại chỉ bớt, vẫn giữ."""
+    db_fixed = settings.facility_audience_column
+    fix = {} if db_fixed else catalog.overrides().get(str(row.get("id")), {})
     if fix.get("exclude"):
         return None
     try:
@@ -87,9 +92,15 @@ def clean(row: dict) -> Facility | None:
         specialties.discard("than_kinh")
         specialties.add("tam_than")
         is_general = False
-    if _has(words, "xét nghiệm"):
+    if _has(words, "xét nghiệm") or _has(words, "tiêm phòng") or _has(words, "dự phòng"):
+        # Điểm xét nghiệm, tiêm phòng, y tế dự phòng: không khám bệnh.
         is_general = False
-    if audience == "all" and (_has(words, "nhi") or _has(words, "trẻ em")) and not _has(words, "sản"):
+    if (
+        not db_fixed
+        and audience == "all"
+        and (_has(words, "nhi") or _has(words, "trẻ em"))
+        and not _has(words, "sản")
+    ):
         # BV / phòng khám Nhi chỉ khám trẻ em; BV Sản–Nhi thì khám cả hai.
         audience = "child"
 
