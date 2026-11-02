@@ -128,3 +128,26 @@ async def test_luu_should_see_doctor_vao_meta_de_do_ti_le_khuyen_di_kham(db_make
             sqlalchemy.select(ChatMessage.meta).where(ChatMessage.role == "assistant")
         )).scalar_one()
     assert meta["should_see_doctor"] is True
+
+
+async def test_luot_moi_doc_duoc_ngay_ca_khi_dang_tom_tat(db_maker, monkeypatch):
+    """Tóm tắt gọi OpenAI mất vài giây: lượt vừa ghi phải commit trước đó để
+    app đọc lịch sử (/v1/conversations) thấy luôn."""
+    from app.services import summarizer
+
+    seen = []
+
+    async def slow_summarize(db, session_id):
+        async with db_maker() as other:
+            seen.extend(await repository.list_messages(other, session_id, msg.user_id, 10))
+        raise RuntimeError("tóm tắt hỏng")
+
+    monkeypatch.setattr(summarizer, "maybe_summarize", slow_summarize)
+    sid = uuid4()
+    msg = request(sid, user_id="u1")
+    with pytest.raises(RuntimeError):
+        await history.record_turn(msg, response(msg))
+
+    assert [m.role for m in seen] == ["user", "assistant"]
+    ctx = await history.load_context(request(sid, user_id="u1"))
+    assert len(ctx.recent) == 2

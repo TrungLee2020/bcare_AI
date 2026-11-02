@@ -9,6 +9,7 @@ Phía service của hợp đồng trong PatronyApp `docs/ai-chat-api.md`. Code: 
 | Hạng mục | Trạng thái |
 |---|---|
 | Code `/v1/chat`, `/v1/report/monthly` | Xong, đã lên server (nhánh `feat/v1-app-api`) |
+| Lịch sử chat `GET /v1/conversations`, `…/{id}/messages` | Code xong (2026-11-02), chưa deploy. Cần chạy migration index trước. |
 | DNS `ai.but.care` → `14.225.29.169` | Xong |
 | Chứng chỉ HTTPS `ai.but.care` | Xong, tự gia hạn |
 | Route `/v1/` trong nginx | Xong (2026-10-14) |
@@ -59,6 +60,7 @@ Mọi lỗi do service trả về đều có dạng `{"error": "<mã>", "message
 | 401 | `unauthorized` | Token hỏng/hết hạn → refresh session hoặc đăng nhập lại. **Chỉ 401 là hết phiên.** |
 | 403 | `consent_required` | Chưa đồng ý Trợ lý AI → hiện màn đồng ý. Không đăng xuất. |
 | 403 | `not_enabled` | Tài khoản chưa nằm trong nhóm được mở → ẩn hoặc báo "sắp có". Không đăng xuất. |
+| 404 | `not_found` | Không có hội thoại này (sai id, hoặc của tài khoản khác) → bỏ khỏi danh sách trên app. |
 | 422 | `invalid_request` / `message_too_long` | Body sai hợp đồng / câu hỏi > 2000 ký tự (kèm `max_chars`). |
 | 413 | `payload_too_large` | Số liệu báo cáo quá lớn. |
 | 429 | `quota_exceeded` | Hết lượt hôm nay. Kèm `limit`, `retry_after` (giây tới 0h) và header `Retry-After`. |
@@ -113,6 +115,57 @@ data: {"type":"done","conversation_id":"…","should_see_doctor":false,"follow_u
 {"reply":"…","conversation_id":"…","should_see_doctor":false,"follow_up_questions":[],"quota_remaining":1}
 ```
 
+## Lịch sử chat
+
+Hai endpoint đọc lại những gì service đã lưu theo `conversation_id`. Chỉ cần `Authorization` như trên; **không** kiểm đồng ý hay rollout (đây là dữ liệu của chính user) và không trừ lượt. Mỗi user chỉ thấy hội thoại của mình.
+
+**Những lượt không có trong lịch sử:** câu chào, lượt `client_safety` `crisis`/`emergency`, câu bị chặn (`blocked`) và lượt lỗi. Các lượt này không gọi model hoặc không có câu trả lời thật, nên service không lưu. Hội thoại chỉ có những lượt đó thì không xuất hiện trong danh sách.
+
+Phân trang bằng `cursor`: lấy `next_cursor` của trang trước gửi lại; `next_cursor: null` là hết. `limit` quá trần thì bị kẹp, không báo lỗi. `cursor`/`limit` không phải số → `422 invalid_request`.
+
+### `GET /v1/conversations?limit=20&cursor=…`
+
+Danh sách hội thoại, hội thoại có tin nhắn mới nhất đứng trước. `limit` mặc định 20, tối đa 50.
+
+```json
+{
+  "conversations": [
+    {
+      "conversation_id": "uuid",
+      "title": "Câu hỏi đầu tiên, tối đa 80 ký tự…",
+      "preview": "Tin nhắn cuối cùng (thường là câu trả lời), tối đa 160 ký tự…",
+      "message_count": 6,
+      "created_at": "2026-11-02T03:15:20.123456+00:00",
+      "updated_at": "2026-11-02T03:20:41.654321+00:00"
+    }
+  ],
+  "next_cursor": "1234"
+}
+```
+
+`title` và `preview` đã gộp xuống dòng thành dấu cách và cắt kèm `…`. Thời gian là ISO 8601, UTC.
+
+### `GET /v1/conversations/{conversation_id}/messages?limit=50&cursor=…`
+
+Tin nhắn của một hội thoại. Trang đầu là các tin **mới nhất**, trả theo thứ tự cũ → mới (đúng thứ tự hiển thị). Kéo lên xem tin cũ hơn thì gửi `next_cursor`. `limit` mặc định 50, tối đa 100.
+
+```json
+{
+  "conversation_id": "uuid",
+  "messages": [
+    {"id": "1201", "role": "user", "content": "Tôi bị đau đầu 3 ngày", "created_at": "…"},
+    {"id": "1202", "role": "assistant", "content": "…", "created_at": "…",
+     "should_see_doctor": false, "follow_up_questions": ["…"]}
+  ],
+  "next_cursor": "1201"
+}
+```
+
+- `should_see_doctor`, `follow_up_questions` chỉ có ở tin `assistant`. Lượt lưu trước 2026-11-02 có `follow_up_questions: []`.
+- Một trang có thể bắt đầu bằng tin `assistant` (câu hỏi của nó nằm ở trang trước).
+- Hội thoại không tồn tại, `conversation_id` không phải UUID, hoặc của tài khoản khác đều trả `404 not_found`.
+- Tiếp tục hội thoại: gửi `POST /v1/chat` với đúng `conversation_id` này.
+
 ## `POST /v1/report/monthly`
 
 Body là object số liệu tổng hợp 2 tháng do app tự tính, tối đa 6000 ký tự khi serialize. Service không ép schema chi tiết: nhận nguyên khối, đưa vào prompt như dữ liệu.
@@ -139,6 +192,7 @@ Gợi ý cơ sở khám theo triệu chứng (KAN-115). Hợp đồng đầy đ�
 ## Deploy
 
 1. `psql "$DATABASE_URL" -f db/migrations/20261010_user_id_supabase_uuid.sql` (`user_id` BIGINT → VARCHAR(64)).
+   `psql "$DATABASE_URL" -f db/migrations/20261102_chat_messages_user_index.sql` (index cho `GET /v1/conversations`).
 2. `.env`: đặt `SUPABASE_URL`, `SUPABASE_ANON_KEY` (và `SUPABASE_JWT_SECRET` nếu project dùng HS256). `ROLLOUT_ALLOWLIST` giờ là danh sách UUID.
 3. Trước khi migration `20261010010000_ai_chat_consent.sql` lên Supabase: `CONSENT_REQUIRED=false` (chỉ ở môi trường test; `APP_ENV=production` từ chối khởi động với giá trị này).
 4. DNS (bản ghi `A` `ai` → IP server) và chứng chỉ `ai.but.care` đã có sẵn.

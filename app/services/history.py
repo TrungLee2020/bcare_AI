@@ -60,7 +60,14 @@ async def record_turn(
                 "out_of_scope": response.answer.out_of_scope,
                 "refusal_reason": response.answer.refusal_reason,
                 "should_see_doctor": response.answer.should_see_doctor,
+                # App mở lại hội thoại thì hiện lại gợi ý của lượt cuối.
+                "follow_up_questions": response.answer.follow_up_questions,
                 "detail": response.detail,
             },
         )
+
+    # Transaction riêng: lượt hỏi-đáp phải commit ngay để app đọc lịch sử thấy
+    # luôn, không chờ lần gọi OpenAI để tóm tắt (vài giây), và không giữ
+    # connection DB trong lúc chờ OpenAI. Tóm tắt lỗi thì lượt vẫn còn.
+    async with db_session() as db:
         await summarizer.maybe_summarize(db, message.session_id)

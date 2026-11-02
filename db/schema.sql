@@ -31,4 +31,6 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 
 CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id ON chat_messages (session_id, id);
 
+CREATE INDEX IF NOT EXISTS idx_chat_messages_user_id ON chat_messages (user_id, id);
+
 CREATE UNIQUE INDEX IF NOT EXISTS uq_chat_messages_request_role ON chat_messages (request_id, role);

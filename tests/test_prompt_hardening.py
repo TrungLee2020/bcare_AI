@@ -192,3 +192,14 @@ def test_v5_tu_gioi_thieu_la_but_khong_bi_coi_la_lo_prompt(answer):
 
 def test_v5_chep_nguyen_doan_danh_tinh_van_bi_bat():
     assert leaks_prompt(load_prompt("system", "v5")[:600], "system", "v5")
+
+
+def test_v6_tu_gioi_thieu_khong_bi_coi_la_lo_prompt():
+    answer = "Chào bạn, mình là Bụt, trợ lý sức khoẻ và bảo hiểm của bCare. Bạn nên nghỉ ngơi và uống đủ nước."
+    assert not leaks_prompt(answer, "system", "v6")
+
+
+def test_v6_co_quy_tac_khong_chem_tieng_anh():
+    prompt = load_prompt("system", "v6")
+    assert "không chêm tiếng Anh" in prompt
+    assert "stress → căng thẳng" in prompt

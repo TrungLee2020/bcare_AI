@@ -84,4 +84,6 @@ class ChatMessage(Base):
         # ra 2 dòng (user + assistant) dùng chung request_id.
         Index("uq_chat_messages_request_role", "request_id", "role", unique=True),
         Index("idx_chat_messages_session_id", "session_id", "id"),
+        # Danh sách hội thoại của app (GET /v1/conversations) gom theo user.
+        Index("idx_chat_messages_user_id", "user_id", "id"),
     )
