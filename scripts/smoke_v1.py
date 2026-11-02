@@ -6,7 +6,7 @@ METRICS_TOKEN của server, không phải chép key ra ngoài):
 
     docker exec -i -e REVIEW_CODE='<mã review>' bcare-ai-app-1 python - < scripts/smoke_v1.py
 
-Mỗi lần chạy tốn khoảng 4 lần gọi OpenAI. Tài khoản demo nằm trong
+Mỗi lần chạy tốn khoảng 6 lần gọi OpenAI. Tài khoản demo nằm trong
 QUOTA_UNLIMITED_USERS nên không hết lượt. Không in token.
 """
 
@@ -129,7 +129,31 @@ def main() -> None:
         if summary:
             print("    summary:", summary[:200].replace("\n", " "), "…")
 
-        # 6. Model nào đã chạy, token suy luận (số liệu của instance này từ lúc khởi động)
+        # 6. Gợi ý cơ sở khám (KAN-115): ca 36 tuổi đau đầu ở Q1 TP.HCM
+        def suggest(**body):
+            payload = {"profile": {"age": 36}, "location": {"lat": 10.776, "lng": 106.700}, **body}
+            started = time.monotonic()
+            resp = client.post(f"{BASE}/v1/facility/suggest", headers={"Authorization": f"Bearer {token}"}, json=payload)
+            return resp, (resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}), time.monotonic() - started
+
+        resp, body, took = suggest(symptom_tags=["headache", "dizziness"])
+        names = [f["name"] for f in body.get("facilities", [])]
+        wrong = [n for n in names if "Nhi" in n or "Tâm thần" in n]
+        check("facility thẻ đau đầu", resp.status_code == 200 and body.get("status") == "ok" and names and not wrong,
+              f"HTTP {resp.status_code} {took:.1f}s n={len(names)} sai_đối_tượng={wrong} error={body.get('error')}")
+        for f in body.get("facilities", [])[:3]:
+            print(f"    {f['distance_km']} km {f['match']}: {f['name']} | {f['reason']}")
+
+        resp, body, took = suggest(text="nhuc dau may hom nay, dung len hay choang")
+        keys = [s["key"] for s in body.get("interpretation", {}).get("symptoms", [])]
+        check("facility câu gõ", resp.status_code == 200 and "headache" in keys,
+              f"HTTP {resp.status_code} {took:.1f}s status={body.get('status')} symptoms={keys}")
+
+        resp, body, took = suggest(text="mẹ tôi tự nhiên méo miệng, yếu nửa người")
+        check("facility cấp cứu", resp.status_code == 200 and body.get("status") == "emergency",
+              f"HTTP {resp.status_code} {took:.1f}s kind={body.get('emergency', {}).get('kind')}")
+
+        # 7. Model nào đã chạy, token suy luận (số liệu của instance này từ lúc khởi động)
         m = client.get("http://127.0.0.1:8000/metrics", headers={"Authorization": f"Bearer {settings.metrics_token}"})
         if m.status_code == 200:
             interesting = {k: v for k, v in m.json().items()

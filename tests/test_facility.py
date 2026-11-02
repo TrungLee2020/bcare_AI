@@ -71,9 +71,9 @@ def test_psychiatry_only_when_user_says_so():
 
 
 def test_general_only_symptom_has_no_specialty():
-    mapping = catalog.map_symptoms(["fever"], "adult")
+    mapping = catalog.map_symptoms(["chills"], "adult")
     assert mapping.specialties == {}
-    assert mapping.general_symptoms == ["fever"]
+    assert mapping.general_symptoms == ["chills"]
 
 
 def test_primary_wins_over_secondary():
@@ -86,6 +86,13 @@ def test_primary_wins_over_secondary():
 def test_age_group_boundary():
     assert catalog.age_group(16) == "child"
     assert catalog.age_group(17) == "adult"
+    assert catalog.age_group(None) == "adult"
+
+
+def test_adult_fever_adds_infectious_disease_as_secondary():
+    mapping = catalog.map_symptoms(["fever"], "adult")
+    assert mapping.general_symptoms == ["fever"]
+    assert mapping.specialties["truyen_nhiem"].role == "secondary"
 
 
 def test_every_map_entry_uses_known_keys():
@@ -125,6 +132,28 @@ def test_name_rules_catch_rows_missing_from_override_list():
     assert clean(row("x5", "Phòng khám Nhị Hà", is_general=True)).audience == "all"
 
 
+def test_vaccination_and_preventive_centres_are_not_general():
+    assert clean(row("x7", "Trung Tâm Y Tế Dự Phòng - Phòng Khám Tiêm Phòng", is_general=True)) is None
+
+
+def test_tropical_disease_hospital_gets_new_key():
+    f = clean(row("9d503159-d61e-4136-8d97-fafa01e41bfe", "Bệnh viện Bệnh Nhiệt đới Trung ương", is_general=True))
+    assert f.specialties == {"truyen_nhiem"} and f.is_general is False
+
+
+def test_db_is_trusted_once_migration_ran(monkeypatch):
+    monkeypatch.setattr(settings, "facility_audience_column", True)
+    # Không còn dùng danh sách sửa tạm: DB nói sao dùng vậy
+    nhi_tw = clean(row(NHI_TW, "Bệnh viện Nhi Trung ương", ["nhi"], audience="child"))
+    assert nhi_tw.audience == "child"
+    assert clean(row(NHI_TW, "Bệnh viện Nhi Trung ương", ["nhi"], audience="all")).audience == "all"
+    binh_dan = clean(row("bd", "Bệnh viện Bình Dân", ["ngoai_tong_quat"], audience="all"))
+    assert binh_dan.specialties == {"ngoai_tong_quat"} and not binh_dan.is_general
+    # Luật chỉ-bớt theo tên vẫn chạy
+    assert "than_kinh" not in clean(row("x", "Bệnh viện Tâm thần X", ["than_kinh"], audience="all")).specialties
+    assert clean(row(PHAP_Y, "Viện Pháp y Tâm thần", ["tam_than"], audience="adult")) is None
+
+
 def test_unknown_specialty_keys_are_dropped():
     assert clean(row("x6", "PK lạ", ["khong_ton_tai"])) is None
 
@@ -154,8 +183,20 @@ def test_child_prefers_pediatric_hospitals():
     assert TAM_THAN_HCM not in ids
 
 
-def test_radius_and_limit():
+def test_adult_fever_puts_general_before_tropical_hospital():
+    rows = [
+        row("trop", "Bệnh viện Bệnh Nhiệt đới", ["truyen_nhiem"], lat=10.80, lng=106.70),
+        row("gen-near", "Bệnh viện Quận 1", is_general=True, lat=10.777, lng=106.700),
+    ]
     mapping = catalog.map_symptoms(["fever"], "adult")
+    ranked = ranking.rank(snapshot_of(rows), mapping, "adult", *HOME, radius_km=10, limit=10)
+    assert [r.facility.id for r in ranked] == ["gen-near", "trop"]
+    assert ranked[0].reason == "Sốt → Đa khoa · Phù hợp: người lớn"
+    assert ranked[1].match == "secondary"
+
+
+def test_radius_and_limit():
+    mapping = catalog.map_symptoms(["chills"], "adult")
     ranked = ranking.rank(snapshot_of(ROWS), mapping, "adult", *HOME, radius_km=10, limit=10)
     assert "gen-far" not in [r.facility.id for r in ranked]
     assert len(ranking.rank(snapshot_of(ROWS), mapping, "adult", *HOME, radius_km=100, limit=1)) == 1
@@ -374,13 +415,65 @@ async def test_api_rejects_bad_input(client, supabase, llm):
 
 
 @pytest.mark.asyncio
-async def test_api_daily_limit(client, supabase, llm, monkeypatch):
+async def test_api_daily_limit_counts_only_llm_calls(client, supabase, llm, monkeypatch):
     monkeypatch.setattr(settings, "facility_max_per_day", 2)
-    for _ in range(2):
+    llm.result = interp(symptoms=[{"key": "cough", "matched_text": "ho"}])
+    # Chỉ thẻ, và dùng lại câu đã đọc (nới bán kính): không tính
+    for _ in range(3):
         assert (await suggest(client, symptom_tags=["cough"])).status_code == 200
-    resp = await suggest(client, symptom_tags=["cough"])
+    assert (await suggest(client, text="ho nhiều")).status_code == 200
+    assert (await suggest(client, text="ho nhiều", radius_km=25)).status_code == 200
+    assert (await suggest(client, text="ho khan")).status_code == 200
+    resp = await suggest(client, text="ho có đờm")
     assert resp.status_code == 429
     assert resp.json()["error"] == "rate_limited"
+    assert len(llm.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_api_failed_llm_call_is_refunded(client, supabase, llm, monkeypatch, redis):
+    monkeypatch.setattr(settings, "facility_max_per_day", 1)
+    llm.error = RuntimeError("openai down")
+    assert (await suggest(client, symptom_tags=["cough"], text="ho nhiều")).status_code == 200
+    llm.error = None
+    assert (await suggest(client, symptom_tags=["cough"], text="ho khan")).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_api_llm_over_budget_falls_back(client, supabase, llm, monkeypatch):
+    import asyncio
+
+    monkeypatch.setattr(settings, "facility_llm_budget_seconds", 0.05)
+
+    async def slow(**kwargs):
+        await asyncio.sleep(1)
+
+    llm.chat.completions.create = slow
+    data = (await suggest(client, symptom_tags=["cough"], text="ho nhiều")).json()
+    assert data["status"] == "ok"
+    assert "chưa đọc được" in data["interpretation"]["note"]
+
+
+@pytest.mark.asyncio
+async def test_api_unknown_age_is_adult(client, supabase, llm):
+    data = (await suggest(client, profile={"age": None}, symptom_tags=["headache"])).json()
+    assert data["interpretation"]["age_group"] == "adult"
+    assert NHI_DONG_2 not in [f["id"] for f in data["facilities"]]
+
+
+@pytest.mark.asyncio
+async def test_api_emergency_facilities_can_be_routed(client, supabase, llm):
+    data = (await suggest(client, text="méo miệng, nói đớ")).json()
+    for f in data["facilities"]:
+        assert f["id"] and isinstance(f["lat"], float) and isinstance(f["lng"], float)
+
+
+@pytest.mark.asyncio
+async def test_api_clarify_choice_with_wider_radius(client, supabase, llm):
+    llm.result = interp(ambiguous_neuro=True)
+    data = (await suggest(client, text="khám thần kinh", clarify_choice="than_kinh", radius_km=50)).json()
+    assert data["status"] == "ok"
+    assert data["facilities"][0]["id"] == "neuro-1"
 
 
 @pytest.mark.asyncio

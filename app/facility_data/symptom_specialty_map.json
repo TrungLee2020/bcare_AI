@@ -20,7 +20,7 @@
   "map": {
     "fatigue":        { "adult": { "primary": ["da_khoa"], "secondary": [], "note": "Mệt kèm sụt cân / khát nước nhiều → thêm noi_tiet" },
                         "child": { "primary": ["nhi"], "secondary": [] } },
-    "fever":          { "adult": { "primary": ["da_khoa"], "secondary": [], "note": "Sốt cao liên tục > 3 ngày, chảy máu cam / chấm xuất huyết → nghi sốt xuất huyết: BV Nhiệt đới (chưa có key)" },
+    "fever":          { "adult": { "primary": ["da_khoa"], "secondary": ["truyen_nhiem"], "note": "Sốt cao liên tục > 3 ngày, chảy máu cam / chấm xuất huyết → nghi sốt xuất huyết: BV Nhiệt đới (truyen_nhiem, team App thêm 2026-11-02)" },
                         "child": { "primary": ["nhi"], "secondary": [], "note": "Khoa Nhiễm / Nội tổng quát trong BV Nhi" } },
     "chills":         { "adult": { "primary": ["da_khoa"], "secondary": [] },
                         "child": { "primary": ["nhi"], "secondary": [] } },

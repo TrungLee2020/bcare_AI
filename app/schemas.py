@@ -71,7 +71,8 @@ class V1FacilityProfile(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     # Tuổi của hồ sơ ĐANG CHỌN (có thể là người thân), không phải chủ tài khoản.
-    age: int = Field(ge=0, le=120)
+    # null = người lớn chưa rõ tuổi (app chỉ gửi null khi đang tìm cho "Tôi").
+    age: int | None = Field(ge=0, le=120)
 
 
 class V1Location(BaseModel):

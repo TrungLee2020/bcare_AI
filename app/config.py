@@ -207,7 +207,12 @@ class Settings(BaseSettings):
     facility_audience_column: bool = False
     # Hỏi max(updated_at) mỗi ngần này giây; đổi thì kéo lại cả bảng.
     facility_refresh_seconds: int = 600
+    # Số lần ĐỌC CÂU GÕ BẰNG MODEL mỗi ngày mỗi user. Lượt chỉ có thẻ, lượt dùng
+    # lại kết quả đã cache (nới bán kính, trả lời câu hỏi làm rõ) không tính.
     facility_max_per_day: int = 30
+    # Trần thời gian cho bước gọi model (gồm cả retry). Quá trần thì gợi ý theo
+    # thẻ / đa khoa. App chờ tối đa 30 giây cho cả request.
+    facility_llm_budget_seconds: float = 15.0
     facility_text_max_chars: int = 500
     facility_default_radius_km: float = 10.0
     facility_max_radius_km: float = 50.0

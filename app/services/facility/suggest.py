@@ -8,9 +8,10 @@
 Thứ tự ưu tiên của trạng thái: emergency → clarify → ok / empty.
 """
 
+import asyncio
 import hashlib
-import json
 import logging
+from collections.abc import Awaitable, Callable
 
 from redis.asyncio import Redis
 
@@ -57,6 +58,14 @@ class InvalidRequest(ValueError):
     pass
 
 
+class LimitReached(Exception):
+    """Hết số lần đọc câu gõ bằng model trong ngày (FACILITY_MAX_PER_DAY)."""
+
+
+async def _free() -> None:
+    return None
+
+
 def _system_prompt() -> str:
     return load_prompt("facility", settings.facility_prompt_version) + "\n" + tag_table()
 
@@ -66,8 +75,15 @@ def _cache_key(text: str) -> str:
     return f"facility_interp:{settings.facility_prompt_version}:{digest}"
 
 
-async def _interpret(redis: Redis, text: str) -> Interpretation | None:
-    """None = không đọc được (LLM lỗi). Câu bị lọc injection coi như câu rỗng."""
+async def _interpret(
+    redis: Redis,
+    text: str,
+    charge: Callable[[], Awaitable[None]],
+    refund: Callable[[], Awaitable[None]],
+) -> Interpretation | None:
+    """None = không đọc được (LLM lỗi hoặc quá FACILITY_LLM_BUDGET_SECONDS).
+    Câu bị lọc injection coi như câu rỗng. Chỉ lần gọi model thật mới bị tính
+    lượt (`charge`, ném LimitReached khi hết); lỗi thì hoàn (`refund`)."""
     if input_filter.check(text).blocked:
         metrics.incr("facility_text_blocked")
         return Interpretation()
@@ -76,9 +92,14 @@ async def _interpret(redis: Redis, text: str) -> Interpretation | None:
     if cached:
         metrics.incr("facility_interp_cached")
         return Interpretation.model_validate_json(cached)
+    await charge()
     try:
-        raw, usage = await openai_client.interpret_symptoms(text, _system_prompt(), SymptomInterpretation)
+        raw, usage = await asyncio.wait_for(
+            openai_client.interpret_symptoms(text, _system_prompt(), SymptomInterpretation),
+            settings.facility_llm_budget_seconds,
+        )
     except Exception:
+        await refund()
         metrics.incr("facility_interp_failed")
         logger.exception("Đọc câu gõ triệu chứng thất bại")
         return None
@@ -127,7 +148,7 @@ def _fmt_km(value: float) -> str:
 async def suggest(
     redis: Redis,
     *,
-    age: int,
+    age: int | None,
     symptom_tags: list[str],
     text: str | None,
     lat: float,
@@ -135,6 +156,8 @@ async def suggest(
     radius_km: float | None,
     limit: int | None,
     clarify_choice: str | None,
+    charge: Callable[[], Awaitable[None]] = _free,
+    refund: Callable[[], Awaitable[None]] = _free,
 ) -> dict:
     tags = catalog.symptom_tags()
     unknown = [t for t in symptom_tags if t not in tags]
@@ -156,7 +179,7 @@ async def suggest(
     found = Interpretation()
     note = None
     if text:
-        result = await _interpret(redis, text)
+        result = await _interpret(redis, text, charge, refund)
         if result is None:
             note = "Bụt chưa đọc được phần mô tả, đang gợi ý theo thẻ bạn chọn." if symptom_tags \
                 else "Bụt chưa đọc được phần mô tả, đang gợi ý chung."
