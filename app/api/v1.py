@@ -14,10 +14,14 @@ tiếp (một lần, không ngữ cảnh), cache theo nội dung số liệu.
 
 `POST /v1/facility/suggest` — gợi ý cơ sở khám theo triệu chứng (KAN-115).
 
+`GET /v1/conversations`, `GET /v1/conversations/{id}/messages` — lịch sử chat
+cho app: đọc lại đúng những lượt consumer đã ghi vào DB.
+
 Lỗi luôn có dạng `{"error": <mã>, "message": <câu hiển thị được>}`:
   401 unauthorized        — token hỏng/hết hạn: app đăng nhập lại.
   403 consent_required    — chưa đồng ý dùng Trợ lý AI: app hiện màn đồng ý.
   403 not_enabled         — tài khoản chưa nằm trong nhóm được mở (rollout).
+  404 not_found           — không có hội thoại này (hoặc của người khác).
   422 invalid_request     — body sai hợp đồng.
   429 quota_exceeded      — hết lượt hỏi trong ngày (kèm retry_after, limit).
   429 rate_limited        — gọi dồn dập / quá số lần tạo báo cáo trong ngày.
@@ -29,7 +33,7 @@ import hashlib
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID, uuid4, uuid5
 from zoneinfo import ZoneInfo
 
@@ -39,6 +43,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from app import metrics
 from app.auth import AuthError, AuthUnavailable, Principal, authenticate
 from app.config import settings
+from app.db import repository
+from app.db.session import db_session
 from app.kafka.producer import publish_chat_request
 from app.redis_client import get_redis
 from app.schemas import (
@@ -66,6 +72,11 @@ DELTA_CHARS = 40
 DELTA_INTERVAL_SECONDS = 0.03
 # Không có response trong hub ngần này giây thì nhìn sang Redis một lần.
 POLL_SECONDS = 1.0
+# Cỡ trang lịch sử: (mặc định, tối đa).
+CONVERSATIONS_PAGE = (20, 50)
+MESSAGES_PAGE = (50, 100)
+TITLE_CHARS = 80
+PREVIEW_CHARS = 160
 # Namespace cho request_id dẫn xuất từ Idempotency-Key (xem `_request_id`).
 _IDEMPOTENCY_NS = UUID("6f1d0c4e-2b8a-4f57-9a43-5f0f3b7c2e10")
 
@@ -537,3 +548,110 @@ async def facility_suggest(payload: V1FacilitySuggestRequest, request: Request):
     except facilities.FacilitiesUnavailable as exc:
         metrics.incr("v1_facility_unavailable")
         raise V1Error(503, "unavailable", "Chưa tải được danh sách cơ sở khám, bạn thử lại sau nhé.") from exc
+
+
+# --- Lịch sử chat -----------------------------------------------------------
+# Chỉ cần đăng nhập, không qua `_gate`: đây là dữ liệu của chính user, rút
+# đồng ý hay ra khỏi rollout không có nghĩa là mất quyền xem lại những gì mình
+# đã hỏi. Lọc theo user_id của token ở tầng truy vấn.
+
+_HISTORY_UNAVAILABLE = "Chưa tải được lịch sử trò chuyện, bạn thử lại sau nhé."
+
+
+def _page(request: Request, sizes: tuple[int, int]) -> tuple[int, int | None]:
+    """`limit` và `cursor` từ query. Đọc tay thay vì để FastAPI validate: lỗi
+    của FastAPI không theo dạng `{"error", "message"}` của /v1. `limit` quá
+    trần thì kẹp lại, không báo lỗi."""
+    default, maximum = sizes
+    raw_limit = request.query_params.get("limit", "")
+    raw_cursor = request.query_params.get("cursor", "")
+    for raw in (raw_limit, raw_cursor):
+        if raw and not re.fullmatch(r"[0-9]{1,18}", raw):
+            raise V1Error(422, "invalid_request", "Tham số phân trang không hợp lệ.")
+    limit = min(max(int(raw_limit), 1), maximum) if raw_limit else default
+    return limit, int(raw_cursor) if raw_cursor else None
+
+
+def _iso(value: datetime) -> str:
+    # SQLite (test) trả datetime không kèm múi giờ; giá trị lưu là UTC.
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.isoformat()
+
+
+def _clip(text: str, limit: int) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[:limit].rstrip() + "…"
+
+
+def _message_body(message) -> dict:
+    body = {
+        "id": str(message.id),
+        "role": message.role,
+        "content": message.content,
+        "created_at": _iso(message.created_at),
+    }
+    if message.role == "assistant":
+        body["should_see_doctor"] = bool(message.meta.get("should_see_doctor", False))
+        # Lượt ghi trước khi lưu gợi ý vào meta thì không có.
+        body["follow_up_questions"] = message.meta.get("follow_up_questions", [])
+    return body
+
+
+@router.get("/conversations")
+async def conversations(request: Request):
+    principal = await _principal(request)
+    metrics.incr("v1_history_conversations")
+    limit, before = _page(request, CONVERSATIONS_PAGE)
+    try:
+        async with db_session() as db:
+            rows = await repository.list_conversations(db, principal.user_id, limit + 1, before)
+    except Exception as exc:
+        metrics.incr("v1_history_unavailable")
+        logger.exception("Đọc danh sách hội thoại thất bại user_id=%s", principal.user_id)
+        raise V1Error(503, "unavailable", _HISTORY_UNAVAILABLE) from exc
+
+    page = rows[:limit]
+    return {
+        "conversations": [
+            {
+                "conversation_id": str(row.session_id),
+                "title": _clip(row.first.content, TITLE_CHARS),
+                "preview": _clip(row.last.content, PREVIEW_CHARS),
+                "message_count": row.message_count,
+                "created_at": _iso(row.first.created_at),
+                "updated_at": _iso(row.last.created_at),
+            }
+            for row in page
+        ],
+        "next_cursor": str(page[-1].last.id) if len(rows) > limit else None,
+    }
+
+
+@router.get("/conversations/{conversation_id}/messages")
+async def conversation_messages(conversation_id: str, request: Request):
+    principal = await _principal(request)
+    metrics.incr("v1_history_messages")
+    limit, before = _page(request, MESSAGES_PAGE)
+    not_found = V1Error(404, "not_found", "Không tìm thấy cuộc trò chuyện này.")
+    try:
+        session_id = UUID(conversation_id)
+    except ValueError:
+        raise not_found from None
+    try:
+        async with db_session() as db:
+            rows = await repository.list_messages(db, session_id, principal.user_id, limit + 1, before)
+    except Exception as exc:
+        metrics.incr("v1_history_unavailable")
+        logger.exception("Đọc lịch sử hội thoại thất bại user_id=%s", principal.user_id)
+        raise V1Error(503, "unavailable", _HISTORY_UNAVAILABLE) from exc
+    if rows is None:
+        raise not_found
+
+    # Lấy dư 1 để biết còn trang cũ hơn; dòng dư là dòng CŨ nhất, nằm đầu list.
+    page = rows[-limit:]
+    return {
+        "conversation_id": str(session_id),
+        "messages": [_message_body(m) for m in page],
+        "next_cursor": str(page[0].id) if len(rows) > limit else None,
+    }

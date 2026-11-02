@@ -60,6 +60,8 @@ async def record_turn(
                 "out_of_scope": response.answer.out_of_scope,
                 "refusal_reason": response.answer.refusal_reason,
                 "should_see_doctor": response.answer.should_see_doctor,
+                # App mở lại hội thoại thì hiện lại gợi ý của lượt cuối.
+                "follow_up_questions": response.answer.follow_up_questions,
                 "detail": response.detail,
             },
         )

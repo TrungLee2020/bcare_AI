@@ -147,6 +147,66 @@ async def load_messages_for_summary(
     return to_summarize, to_summarize[-1].id
 
 
+@dataclass
+class ConversationOverview:
+    """Một dòng trong danh sách hội thoại của app."""
+
+    session_id: UUID
+    first: ChatMessage
+    last: ChatMessage
+    message_count: int
+
+
+async def list_conversations(
+    db: AsyncSession, user_id: str, limit: int, before_id: int | None = None
+) -> list[ConversationOverview]:
+    """
+    Hội thoại của user, mới hoạt động nhất trước. Sắp và phân trang theo id
+    message cuối của từng hội thoại: id tăng dần theo thời gian ghi, nên không
+    cần cột updated_at phải được cập nhật đúng ở mọi chỗ ghi.
+
+    `before_id`: chỉ lấy hội thoại có message cuối < before_id (trang sau).
+    """
+    last_id = func.max(ChatMessage.id).label("last_id")
+    query = (
+        select(ChatMessage.session_id, func.min(ChatMessage.id), last_id, func.count())
+        .where(ChatMessage.user_id == user_id)
+        .group_by(ChatMessage.session_id)
+        .order_by(last_id.desc())
+        .limit(limit)
+    )
+    if before_id is not None:
+        query = query.having(func.max(ChatMessage.id) < before_id)
+    groups = (await db.execute(query)).all()
+    if not groups:
+        return []
+
+    ids = {g[1] for g in groups} | {g[2] for g in groups}
+    rows = {m.id: m for m in (await db.scalars(select(ChatMessage).where(ChatMessage.id.in_(ids)))).all()}
+    return [
+        ConversationOverview(session_id=sid, first=rows[first_id], last=rows[last_id_], message_count=count)
+        for sid, first_id, last_id_, count in groups
+    ]
+
+
+async def list_messages(
+    db: AsyncSession, session_id: UUID, user_id: str, limit: int, before_id: int | None = None
+) -> list[ChatMessage] | None:
+    """
+    `limit` message mới nhất của phiên (có `before_id` thì chỉ lấy message cũ
+    hơn), trả theo thứ tự CŨ -> MỚI. None khi không có phiên hoặc phiên của
+    user khác: cùng một kết quả để không lộ phiên nào tồn tại.
+    """
+    session = await db.get(ChatSession, session_id)
+    if session is None or session.user_id != user_id:
+        return None
+    query = select(ChatMessage).where(ChatMessage.session_id == session_id)
+    if before_id is not None:
+        query = query.where(ChatMessage.id < before_id)
+    rows = list((await db.scalars(query.order_by(ChatMessage.id.desc()).limit(limit))).all())
+    return list(reversed(rows))
+
+
 async def update_summary(
     db: AsyncSession, session_id: UUID, summary: str, through_id: int
 ) -> None:
