@@ -1,8 +1,11 @@
 """
 Model SQLAlchemy — nguồn sự thật DUY NHẤT cho schema.
 
-`db/schema.sql` được SINH RA từ file này (`python -m scripts.dump_schema`), không
-sửa tay. Hai nơi định nghĩa schema thì sớm muộn cũng lệch nhau.
+Sửa model thì sinh kèm một revision Alembic rồi đọc lại trước khi commit:
+
+    alembic revision --autogenerate -m "mô tả ngắn"
+
+tests/test_migrations.py đỏ nếu model và các revision trong db/alembic lệch nhau.
 """
 
 from datetime import datetime

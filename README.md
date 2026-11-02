@@ -25,7 +25,7 @@ FE --POST /chat/ask--> [auth] -> [rollout] -> [idempotency] -> [quota] -> Kafka(
 pip install -r requirements-dev.txt
 cp .env.example .env          # đặt OPENAI_API_KEY và AUTH_SECRET
 python -m scripts.create_topics   # production: xem docs/phase8
-psql "$DATABASE_URL" -f db/schema.sql
+alembic upgrade head          # tạo/nâng cấp bảng (docker compose tự chạy)
 uvicorn app.main:app --reload
 ```
 

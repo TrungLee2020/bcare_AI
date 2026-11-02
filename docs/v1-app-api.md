@@ -9,7 +9,7 @@ Phía service của hợp đồng trong PatronyApp `docs/ai-chat-api.md`. Code: 
 | Hạng mục | Trạng thái |
 |---|---|
 | Code `/v1/chat`, `/v1/report/monthly` | Xong, đã lên server (nhánh `feat/v1-app-api`) |
-| Lịch sử chat `GET /v1/conversations`, `…/{id}/messages` | Code xong (2026-11-02), chưa deploy. Cần chạy migration index trước. |
+| Lịch sử chat `GET /v1/conversations`, `…/{id}/messages` | Code xong (2026-11-02), chưa deploy. Index mới do service `migrate` tự tạo khi `docker compose up`. |
 | DNS `ai.but.care` → `14.225.29.169` | Xong |
 | Chứng chỉ HTTPS `ai.but.care` | Xong, tự gia hạn |
 | Route `/v1/` trong nginx | Xong (2026-10-14) |
@@ -191,8 +191,7 @@ Gợi ý cơ sở khám theo triệu chứng (KAN-115). Hợp đồng đầy đ�
 
 ## Deploy
 
-1. `psql "$DATABASE_URL" -f db/migrations/20261010_user_id_supabase_uuid.sql` (`user_id` BIGINT → VARCHAR(64)).
-   `psql "$DATABASE_URL" -f db/migrations/20261102_chat_messages_user_index.sql` (index cho `GET /v1/conversations`).
+1. Schema DB tự nâng cấp: mỗi lần `docker compose up -d --build`, service `migrate` chạy `alembic upgrade head` rồi app mới khởi động. Lỗi thì xem `docker compose logs migrate`. Lần đầu dùng Alembic trên DB cũ, revision `0001` thấy bảng đã có nên bỏ qua, chỉ ghi version.
 2. `.env`: đặt `SUPABASE_URL`, `SUPABASE_ANON_KEY` (và `SUPABASE_JWT_SECRET` nếu project dùng HS256). `ROLLOUT_ALLOWLIST` giờ là danh sách UUID.
 3. Trước khi migration `20261010010000_ai_chat_consent.sql` lên Supabase: `CONSENT_REQUIRED=false` (chỉ ở môi trường test; `APP_ENV=production` từ chối khởi động với giá trị này).
 4. DNS (bản ghi `A` `ai` → IP server) và chứng chỉ `ai.but.care` đã có sẵn.
