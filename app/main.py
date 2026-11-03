@@ -17,6 +17,7 @@ from app.kafka.response_consumer import start_response_consumer, stop_response_c
 from app.kafka.producer import publish_chat_request, start_producer, stop_producer
 from app.redis_client import start_redis, stop_redis
 from app.services import cost
+from app.services.history import start_purge, stop_purge
 from app.services.consent import stop_consent_client
 from app.services.facility.facilities import stop_facility_client
 from app.services.openai_client import start_openai, stop_openai
@@ -132,7 +133,9 @@ async def lifespan(app: FastAPI):
     await start_producer()
     start_consumer()
     start_response_consumer()
+    start_purge()
     yield
+    await stop_purge()
     await stop_response_consumer()
     await stop_consumer()
     await stop_producer()

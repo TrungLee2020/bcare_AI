@@ -63,8 +63,10 @@ async def test_db_production_cu_duoc_nang_cap_ma_giu_du_lieu(conn):
     chưa có index user_id."""
 
     def prepare(sync_conn):
-        Base.metadata.create_all(sync_conn)
-        sync_conn.execute(sa.text("DROP INDEX idx_chat_messages_user_id"))
+        # 0001 đúng bằng schema.sql cũ; bỏ alembic_version là ra DB production
+        # trước lần deploy có Alembic.
+        _upgrade(sync_conn, "0001")
+        sync_conn.execute(sa.text("DROP TABLE alembic_version"))
         sid = uuid4()
         sync_conn.execute(sa.insert(ChatSession).values(id=sid, user_id="u1"))
         sync_conn.execute(sa.insert(ChatMessage).values(
@@ -85,4 +87,4 @@ async def test_upgrade_lan_hai_khong_lam_gi(conn):
     await conn.run_sync(_upgrade)
     await conn.run_sync(_upgrade)
     version = await conn.scalar(sa.text("SELECT version_num FROM alembic_version"))
-    assert version == "0002"
+    assert version == "0003"

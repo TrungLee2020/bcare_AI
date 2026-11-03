@@ -16,6 +16,8 @@ tiếp (một lần, không ngữ cảnh), cache theo nội dung số liệu.
 
 `GET /v1/conversations`, `GET /v1/conversations/{id}/messages` — lịch sử chat
 cho app: đọc lại đúng những lượt consumer đã ghi vào DB.
+`DELETE /v1/conversations[/{id}]` — user xoá lịch sử: ẩn ngay, xoá hẳn khỏi DB
+sau HISTORY_PURGE_AFTER_DAYS ngày (app/services/history.py).
 
 Lỗi luôn có dạng `{"error": <mã>, "message": <câu hiển thị được>}`:
   401 unauthorized        — token hỏng/hết hạn: app đăng nhập lại.
@@ -38,7 +40,7 @@ from uuid import UUID, uuid4, uuid5
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, FastAPI, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from app import metrics
 from app.auth import AuthError, AuthUnavailable, Principal, authenticate
@@ -552,8 +554,8 @@ async def facility_suggest(payload: V1FacilitySuggestRequest, request: Request):
 
 # --- Lịch sử chat -----------------------------------------------------------
 # Chỉ cần đăng nhập, không qua `_gate`: đây là dữ liệu của chính user, rút
-# đồng ý hay ra khỏi rollout không có nghĩa là mất quyền xem lại những gì mình
-# đã hỏi. Lọc theo user_id của token ở tầng truy vấn.
+# đồng ý hay ra khỏi rollout không có nghĩa là mất quyền xem lại hay xoá những
+# gì mình đã hỏi. Lọc theo user_id của token ở tầng truy vấn.
 
 _HISTORY_UNAVAILABLE = "Chưa tải được lịch sử trò chuyện, bạn thử lại sau nhé."
 
@@ -655,3 +657,44 @@ async def conversation_messages(conversation_id: str, request: Request):
         "messages": [_message_body(m) for m in page],
         "next_cursor": str(page[0].id) if len(rows) > limit else None,
     }
+
+
+_DELETE_UNAVAILABLE = "Chưa xoá được lịch sử trò chuyện, bạn thử lại sau nhé."
+
+
+@router.delete("/conversations")
+async def delete_conversations(request: Request):
+    """Xoá mọi hội thoại của user. App gọi TRƯỚC khi xoá tài khoản Supabase:
+    xoá tài khoản xong thì token không còn dùng được nữa."""
+    principal = await _principal(request)
+    metrics.incr("v1_history_delete_all")
+    try:
+        async with db_session() as db:
+            deleted = await repository.soft_delete_all(db, principal.user_id)
+    except Exception as exc:
+        metrics.incr("v1_history_delete_failed")
+        logger.exception("Xoá toàn bộ lịch sử thất bại user_id=%s", principal.user_id)
+        raise V1Error(503, "unavailable", _DELETE_UNAVAILABLE) from exc
+    logger.info("Xoá toàn bộ lịch sử user_id=%s conversations=%d", principal.user_id, deleted)
+    return Response(status_code=204)
+
+
+@router.delete("/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: str, request: Request):
+    principal = await _principal(request)
+    metrics.incr("v1_history_delete")
+    not_found = V1Error(404, "not_found", "Không tìm thấy cuộc trò chuyện này.")
+    try:
+        session_id = UUID(conversation_id)
+    except ValueError:
+        raise not_found from None
+    try:
+        async with db_session() as db:
+            deleted = await repository.soft_delete_conversation(db, session_id, principal.user_id)
+    except Exception as exc:
+        metrics.incr("v1_history_delete_failed")
+        logger.exception("Xoá hội thoại thất bại user_id=%s", principal.user_id)
+        raise V1Error(503, "unavailable", _DELETE_UNAVAILABLE) from exc
+    if not deleted:
+        raise not_found
+    return Response(status_code=204)

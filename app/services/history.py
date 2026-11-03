@@ -1,6 +1,9 @@
-"""Cầu nối giữa consumer và tầng DB: nạp ngữ cảnh, ghi lại lượt hỏi-đáp."""
+"""Cầu nối giữa consumer và tầng DB: nạp ngữ cảnh, ghi lại lượt hỏi-đáp, xoá
+hẳn các hội thoại user đã xoá."""
 
+import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 
 from app.config import settings
 from app.db import repository
@@ -46,6 +49,11 @@ async def record_turn(
                 message.session_id,
             )
             return
+        if session.deleted_at is not None:
+            # User xoá hội thoại trong lúc câu trả lời đang sinh: không ghi lại
+            # thứ họ vừa xoá.
+            logger.info("session_id=%s đã bị xoá, không ghi lịch sử", message.session_id)
+            return
         await repository.save_turn(
             db,
             session_id=message.session_id,
@@ -71,3 +79,42 @@ async def record_turn(
     # connection DB trong lúc chờ OpenAI. Tóm tắt lỗi thì lượt vẫn còn.
     async with db_session() as db:
         await summarizer.maybe_summarize(db, message.session_id)
+
+
+_purge_task: asyncio.Task | None = None
+
+
+async def purge_deleted() -> int:
+    """Xoá hẳn hội thoại đã bị ẩn quá HISTORY_PURGE_AFTER_DAYS ngày."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=settings.history_purge_after_days)
+    async with db_session() as db:
+        return await repository.purge_deleted(db, cutoff)
+
+
+async def _purge_forever() -> None:
+    # Chạy trên mọi instance: DELETE theo mốc thời gian, chạy trùng cũng vô hại.
+    while True:
+        try:
+            purged = await purge_deleted()
+            if purged:
+                logger.info("Đã xoá hẳn %d hội thoại user đã xoá", purged)
+        except Exception:
+            logger.exception("Xoá hẳn hội thoại đã xoá thất bại, thử lại lần sau")
+        await asyncio.sleep(settings.history_purge_interval_seconds)
+
+
+def start_purge() -> None:
+    global _purge_task
+    _purge_task = asyncio.create_task(_purge_forever())
+
+
+async def stop_purge() -> None:
+    global _purge_task
+    task, _purge_task = _purge_task, None
+    if task is None:
+        return
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass

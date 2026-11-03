@@ -494,3 +494,25 @@ async def test_facility_cache_survives_supabase_outage(supabase, monkeypatch):
     supabase.fail = False
     await facilities.get()
     assert supabase.full_loads == 1  # updated_at không đổi → không kéo lại
+
+
+@pytest.mark.asyncio
+async def test_api_after_limit_tags_only_retry_still_works(client, supabase, llm, monkeypatch):
+    """Luồng của app khi gặp 429 có câu gõ: nút "Tìm bằng thẻ đã chọn" gửi lại
+    request KHÔNG có text. Lượt đó không gọi model nên không được 429."""
+    monkeypatch.setattr(settings, "facility_max_per_day", 1)
+    llm.result = interp(symptoms=[{"key": "cough", "matched_text": "ho"}])
+    assert (await suggest(client, symptom_tags=["cough"], text="ho nhiều")).status_code == 200
+    blocked = await suggest(client, symptom_tags=["cough"], text="ho khan")
+    assert blocked.status_code == 429 and blocked.json()["error"] == "rate_limited"
+    retry = await suggest(client, symptom_tags=["cough"])
+    assert retry.status_code == 200
+    assert retry.json()["status"] == "ok"
+    assert len(llm.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_api_locale_en_accepted_answers_in_vietnamese(client, supabase, llm):
+    resp = await suggest(client, symptom_tags=["headache"], locale="en")
+    assert resp.status_code == 200
+    assert resp.json()["interpretation"]["specialties"][0]["label"] == "Nội thần kinh"

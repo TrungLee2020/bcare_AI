@@ -54,6 +54,9 @@ class ChatSession(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    # User xoá hội thoại: ẩn ngay khỏi lịch sử và ngữ cảnh, job xoá hẳn khỏi
+    # DB sau HISTORY_PURGE_AFTER_DAYS ngày (luật cho tối đa ~20 ngày).
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
         Index("idx_chat_sessions_user_created", "user_id", created_at.desc()),
