@@ -119,6 +119,11 @@ def main() -> None:
         check("danh sách hội thoại", listed[:1] == [conversation_id], f"HTTP {resp.status_code} n={len(listed)}")
         resp = client.get(f"{BASE}/v1/conversations/{uuid.uuid4()}/messages", headers=auth_header)
         check("hội thoại lạ 404", resp.status_code == 404 and resp.json().get("error") == "not_found", f"HTTP {resp.status_code}")
+        # Xoá hội thoại vừa tạo (cũng là dọn dữ liệu của lần smoke này)
+        resp = client.delete(f"{BASE}/v1/conversations/{conversation_id}", headers=auth_header)
+        gone = client.get(f"{BASE}/v1/conversations/{conversation_id}/messages", headers=auth_header)
+        check("xoá hội thoại", resp.status_code == 204 and gone.status_code == 404,
+              f"DELETE HTTP {resp.status_code}, đọc lại HTTP {gone.status_code}")
 
         # 3. Gửi lại cùng Idempotency-Key: cùng câu trả lời, không tính thêm
         key = {"Idempotency-Key": f"smoke-{uuid.uuid4()}"}

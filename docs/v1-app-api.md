@@ -9,7 +9,8 @@ Phía service của hợp đồng trong PatronyApp `docs/ai-chat-api.md`. Code: 
 | Hạng mục | Trạng thái |
 |---|---|
 | Code `/v1/chat`, `/v1/report/monthly` | Xong, đã lên server (nhánh `feat/v1-app-api`) |
-| Lịch sử chat `GET /v1/conversations`, `…/{id}/messages` | Code xong (2026-11-02), chưa deploy. Index mới do service `migrate` tự tạo khi `docker compose up`. |
+| Lịch sử chat `GET /v1/conversations`, `…/{id}/messages` | Đã deploy (2026-11-02) |
+| Xoá lịch sử `DELETE /v1/conversations[/{id}]` | Code xong (2026-11-03), chưa deploy. Cột mới do service `migrate` tự thêm. |
 | DNS `ai.but.care` → `14.225.29.169` | Xong |
 | Chứng chỉ HTTPS `ai.but.care` | Xong, tự gia hạn |
 | Route `/v1/` trong nginx | Xong (2026-10-14) |
@@ -117,7 +118,9 @@ data: {"type":"done","conversation_id":"…","should_see_doctor":false,"follow_u
 
 ## Lịch sử chat
 
-Hai endpoint đọc lại những gì service đã lưu theo `conversation_id`. Chỉ cần `Authorization` như trên; **không** kiểm đồng ý hay rollout (đây là dữ liệu của chính user) và không trừ lượt. Mỗi user chỉ thấy hội thoại của mình.
+Đọc lại và xoá những gì service đã lưu theo `conversation_id`. Chỉ cần `Authorization` như trên; **không** kiểm đồng ý hay rollout (đây là dữ liệu của chính user) và không trừ lượt. Mỗi user chỉ thấy và xoá được hội thoại của mình.
+
+**Thời hạn lưu:** lịch sử được lưu cho tới khi user xoá (từng hội thoại, hoặc toàn bộ khi xoá tài khoản). Xoá thì hội thoại biến mất ngay khỏi lịch sử và khỏi ngữ cảnh của Bụt; service xoá hẳn khỏi DB sau 14 ngày (`HISTORY_PURGE_AFTER_DAYS`). Luật BVDLCN 2025 / NĐ 356/2025 cho khoảng 20 ngày để thực hiện yêu cầu xoá.
 
 **Những lượt không có trong lịch sử:** câu chào, lượt `client_safety` `crisis`/`emergency`, câu bị chặn (`blocked`) và lượt lỗi. Các lượt này không gọi model hoặc không có câu trả lời thật, nên service không lưu. Hội thoại chỉ có những lượt đó thì không xuất hiện trong danh sách.
 
@@ -164,7 +167,19 @@ Tin nhắn của một hội thoại. Trang đầu là các tin **mới nhất**
 - `should_see_doctor`, `follow_up_questions` chỉ có ở tin `assistant`. Lượt lưu trước 2026-11-02 có `follow_up_questions: []`.
 - Một trang có thể bắt đầu bằng tin `assistant` (câu hỏi của nó nằm ở trang trước).
 - Hội thoại không tồn tại, `conversation_id` không phải UUID, hoặc của tài khoản khác đều trả `404 not_found`.
-- Tiếp tục hội thoại: gửi `POST /v1/chat` với đúng `conversation_id` này.
+- Tiếp tục hội thoại: gửi `POST /v1/chat` với đúng `conversation_id` này. Chỉ gửi tối đa 48 message (`/v1/chat` trả `422` nếu nhiều hơn); service chỉ dùng câu hỏi cuối và tự nạp ngữ cảnh.
+
+### `DELETE /v1/conversations/{conversation_id}`
+
+Xoá một hội thoại (vd thao tác vuốt để xoá). Thành công: `204`, không có body. Không có, đã xoá rồi, hoặc của tài khoản khác: `404 not_found`.
+
+Hội thoại đã xoá không mở lại được: hỏi tiếp bằng `conversation_id` đó thì Bụt không còn nhớ gì và lượt mới không được lưu. App mở hội thoại mới.
+
+### `DELETE /v1/conversations`
+
+Xoá **toàn bộ** lịch sử của tài khoản. Luôn trả `204` (kể cả khi không có gì để xoá), nên gọi lại an toàn.
+
+**Xoá tài khoản:** app gọi API này **trước khi** xoá tài khoản Supabase (xoá tài khoản xong thì token không dùng được nữa). Gọi lỗi (`503`, mất mạng) thì chưa xoá tài khoản, cho user thử lại.
 
 ## `POST /v1/report/monthly`
 

@@ -151,3 +151,65 @@ async def test_luot_moi_doc_duoc_ngay_ca_khi_dang_tom_tat(db_maker, monkeypatch)
     assert [m.role for m in seen] == ["user", "assistant"]
     ctx = await history.load_context(request(sid, user_id="u1"))
     assert len(ctx.recent) == 2
+
+
+async def soft_delete(db_maker, sid, user_id):
+    async with db_maker() as db:
+        assert await repository.soft_delete_conversation(db, sid, user_id)
+        await db.commit()
+
+
+async def test_hoi_thoai_da_xoa_khong_con_la_ngu_canh(db_maker):
+    sid = uuid4()
+    msg = request(sid, "Tôi bị đau đầu", user_id="u1")
+    await history.record_turn(msg, response(msg))
+    await soft_delete(db_maker, sid, "u1")
+
+    ctx = await history.load_context(request(sid, user_id="u1"))
+    assert ctx.is_empty
+
+
+async def test_khong_ghi_luot_moi_vao_hoi_thoai_da_xoa(db_maker):
+    """User xoá trong lúc câu trả lời đang sinh: lượt đó không được ghi lại."""
+    import sqlalchemy
+
+    from app.db.models import ChatMessage
+
+    sid = uuid4()
+    first = request(sid, user_id="u1")
+    await history.record_turn(first, response(first))
+    await soft_delete(db_maker, sid, "u1")
+    late = request(sid, "câu đến sau khi xoá", user_id="u1")
+    await history.record_turn(late, response(late))
+
+    async with db_maker() as db:
+        contents = (await db.scalars(sqlalchemy.select(ChatMessage.content))).all()
+    assert "câu đến sau khi xoá" not in contents
+
+
+async def test_xoa_han_sau_thoi_han_kem_message_va_summary(db_maker):
+    from datetime import datetime, timedelta, timezone
+
+    import sqlalchemy
+
+    from app.db.models import ChatMessage, ChatSession
+
+    gone, kept, recent = uuid4(), uuid4(), uuid4()
+    for sid in (gone, kept, recent):
+        msg = request(sid, user_id="u1")
+        await history.record_turn(msg, response(msg))
+    await soft_delete(db_maker, recent, "u1")
+    async with db_maker() as db:
+        # Xoá từ 15 ngày trước: quá hạn 14 ngày
+        old = datetime.now(timezone.utc) - timedelta(days=settings.history_purge_after_days + 1)
+        await db.execute(sqlalchemy.update(ChatSession).where(ChatSession.id == gone).values(deleted_at=old))
+        await db.commit()
+
+    assert await history.purge_deleted() == 1
+
+    async with db_maker() as db:
+        sessions = set((await db.scalars(sqlalchemy.select(ChatSession.id))).all())
+        message_sessions = set((await db.scalars(sqlalchemy.select(ChatMessage.session_id))).all())
+    # Đã xoá nhưng chưa tới hạn thì vẫn còn (ẩn); chưa xoá thì nguyên vẹn
+    assert sessions == {kept, recent}
+    assert message_sessions == {kept, recent}

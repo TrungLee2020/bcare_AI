@@ -162,3 +162,53 @@ async def test_hoi_thoai_khong_ton_tai_hoac_id_sai_tra_404(client):
         resp = await client.get(f"/v1/conversations/{cid}/messages", headers=auth())
         assert resp.status_code == 404
         assert resp.json()["error"] == "not_found"
+
+
+# --- DELETE /v1/conversations[/{id}] ---------------------------------------
+
+async def test_xoa_mot_hoi_thoai_an_ngay_khoi_lich_su(client):
+    keep, gone = uuid4(), uuid4()
+    await turn(keep, "giữ lại")
+    await turn(gone, "xoá đi")
+
+    resp = await client.delete(f"/v1/conversations/{gone}", headers=auth())
+    assert resp.status_code == 204
+
+    listed = (await client.get("/v1/conversations", headers=auth())).json()["conversations"]
+    assert [c["conversation_id"] for c in listed] == [str(keep)]
+    resp = await client.get(f"/v1/conversations/{gone}/messages", headers=auth())
+    assert resp.status_code == 404
+
+
+async def test_xoa_hoi_thoai_khong_ton_tai_da_xoa_hoac_cua_nguoi_khac_tra_404(client):
+    mine, theirs = uuid4(), uuid4()
+    await turn(mine, "của tôi")
+    await turn(theirs, "của người khác", user_id=OTHER)
+    await client.delete(f"/v1/conversations/{mine}", headers=auth())
+
+    for cid in (str(uuid4()), "khong-phai-uuid", str(mine), str(theirs)):
+        resp = await client.delete(f"/v1/conversations/{cid}", headers=auth())
+        assert resp.status_code == 404
+        assert resp.json()["error"] == "not_found"
+    # Hội thoại của người khác vẫn còn nguyên với chủ của nó
+    resp = await client.get(f"/v1/conversations/{theirs}/messages", headers=auth(sub=OTHER))
+    assert resp.status_code == 200
+
+
+async def test_xoa_toan_bo_chi_xoa_cua_minh(client):
+    await turn(uuid4(), "câu 1")
+    await turn(uuid4(), "câu 2")
+    await turn(uuid4(), "của người khác", user_id=OTHER)
+
+    resp = await client.delete("/v1/conversations", headers=auth())
+    assert resp.status_code == 204
+    assert (await client.get("/v1/conversations", headers=auth())).json()["conversations"] == []
+    others = (await client.get("/v1/conversations", headers=auth(sub=OTHER))).json()["conversations"]
+    assert len(others) == 1
+    # Gọi lại khi đã hết thì vẫn 204
+    assert (await client.delete("/v1/conversations", headers=auth())).status_code == 204
+
+
+async def test_xoa_khong_co_token_tra_401(client):
+    assert (await client.delete("/v1/conversations")).status_code == 401
+    assert (await client.delete(f"/v1/conversations/{uuid4()}")).status_code == 401

@@ -2,9 +2,10 @@
 ranh giới transaction."""
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -51,7 +52,7 @@ async def load_context(
     lịch sử sức khoẻ của họ (qua câu trả lời của model).
     """
     session = await db.get(ChatSession, session_id)
-    if session is None or session.user_id != user_id:
+    if session is None or session.user_id != user_id or session.deleted_at is not None:
         return ConversationContext()
 
     query = select(ChatMessage).where(ChatMessage.session_id == session_id)
@@ -166,11 +167,13 @@ async def list_conversations(
     cần cột updated_at phải được cập nhật đúng ở mọi chỗ ghi.
 
     `before_id`: chỉ lấy hội thoại có message cuối < before_id (trang sau).
+    Hội thoại user đã xoá không hiện.
     """
     last_id = func.max(ChatMessage.id).label("last_id")
     query = (
         select(ChatMessage.session_id, func.min(ChatMessage.id), last_id, func.count())
-        .where(ChatMessage.user_id == user_id)
+        .join(ChatSession, ChatSession.id == ChatMessage.session_id)
+        .where(ChatMessage.user_id == user_id, ChatSession.deleted_at.is_(None))
         .group_by(ChatMessage.session_id)
         .order_by(last_id.desc())
         .limit(limit)
@@ -194,17 +197,49 @@ async def list_messages(
 ) -> list[ChatMessage] | None:
     """
     `limit` message mới nhất của phiên (có `before_id` thì chỉ lấy message cũ
-    hơn), trả theo thứ tự CŨ -> MỚI. None khi không có phiên hoặc phiên của
-    user khác: cùng một kết quả để không lộ phiên nào tồn tại.
+    hơn), trả theo thứ tự CŨ -> MỚI. None khi không có phiên, phiên đã xoá
+    hoặc phiên của user khác: cùng một kết quả để không lộ phiên nào tồn tại.
     """
     session = await db.get(ChatSession, session_id)
-    if session is None or session.user_id != user_id:
+    if session is None or session.user_id != user_id or session.deleted_at is not None:
         return None
     query = select(ChatMessage).where(ChatMessage.session_id == session_id)
     if before_id is not None:
         query = query.where(ChatMessage.id < before_id)
     rows = list((await db.scalars(query.order_by(ChatMessage.id.desc()).limit(limit))).all())
     return list(reversed(rows))
+
+
+async def soft_delete_conversation(db: AsyncSession, session_id: UUID, user_id: str) -> bool:
+    """Ẩn một hội thoại. False khi không có, của user khác, hoặc đã xoá."""
+    result = await db.execute(
+        update(ChatSession)
+        .where(ChatSession.id == session_id, ChatSession.user_id == user_id, ChatSession.deleted_at.is_(None))
+        .values(deleted_at=func.now())
+    )
+    return result.rowcount > 0
+
+
+async def soft_delete_all(db: AsyncSession, user_id: str) -> int:
+    """Ẩn mọi hội thoại của user (app gọi trước khi xoá tài khoản)."""
+    result = await db.execute(
+        update(ChatSession)
+        .where(ChatSession.user_id == user_id, ChatSession.deleted_at.is_(None))
+        .values(deleted_at=func.now())
+    )
+    return result.rowcount
+
+
+async def purge_deleted(db: AsyncSession, deleted_before: datetime) -> int:
+    """
+    Xoá hẳn các hội thoại đã bị ẩn trước `deleted_before`, kèm message và
+    summary. Xoá message tường minh thay vì dựa vào ON DELETE CASCADE: SQLite
+    (test) chỉ cascade khi bật PRAGMA foreign_keys trên đúng connection đó.
+    """
+    expired = select(ChatSession.id).where(ChatSession.deleted_at < deleted_before)
+    await db.execute(delete(ChatMessage).where(ChatMessage.session_id.in_(expired)))
+    result = await db.execute(delete(ChatSession).where(ChatSession.deleted_at < deleted_before))
+    return result.rowcount
 
 
 async def update_summary(

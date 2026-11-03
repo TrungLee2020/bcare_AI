@@ -124,6 +124,11 @@ class Settings(BaseSettings):
     # một phiên có summary luôn bị từ chối (vd người dùng từng thử injection và
     # model cứ chép lại) sẽ tốn thêm một lần gọi tóm tắt ở MỌI lượt hỏi sau.
     summary_retry_after_messages: int = 6
+    # Lịch sử lưu tới khi user xoá. Xoá (DELETE /v1/conversations...) thì ẩn
+    # ngay, sau ngần này ngày mới xoá hẳn khỏi DB: Luật BVDLCN 2025 / NĐ
+    # 356/2025 cho khoảng 20 ngày để xoá theo yêu cầu, nên không đặt quá 20.
+    history_purge_after_days: int = 14
+    history_purge_interval_seconds: int = 3600
 
     # Retry khi gọi OpenAI lỗi tạm thời (rate limit, timeout, 5xx)
     openai_max_attempts: int = 3
