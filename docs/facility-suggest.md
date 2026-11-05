@@ -1,6 +1,6 @@
 # Gợi ý cơ sở khám theo triệu chứng (`/v1/facility/suggest`) — KAN-115
 
-**Trạng thái (2026-11-05):** team App đã duyệt hợp đồng (mục 2–4) và làm xong mục 8 (gồm cả `age: null`, `locale`, luồng 429). App phát hành 05/11; bản Android 2034 đã bật cờ `FACILITY_AI`, nên đã có lượt gọi thật. Migration `20261102000000_facility_audience_and_fixes.sql` đã chạy trên production tối 03/11; bên AI cần bật `FACILITY_AUDIENCE_COLUMN=true` trên server. Product còn chốt các câu ở mục 7; chỗ nào chưa chốt thì service đang chạy theo đề xuất ghi ở đó.
+**Trạng thái (2026-11-05):** team App đã duyệt hợp đồng (mục 2–4) và làm xong mục 8 (gồm cả `age: null`, `locale`, luồng 429). App phát hành 05/11; bản Android 2034 đã bật cờ `FACILITY_AI`, nên đã có lượt gọi thật. Migration `20261102000000_facility_audience_and_fixes.sql` đã chạy trên production tối 03/11; server đã bật `FACILITY_AUDIENCE_COLUMN=true` ngày 05/11, nên DB là nguồn đúng và `facility_overrides.json` không còn dùng. Product còn chốt các câu ở mục 7; chỗ nào chưa chốt thì service đang chạy theo đề xuất ghi ở đó.
 
 Code: [`app/services/facility/`](../app/services/facility/), endpoint trong [`app/api/v1.py`](../app/api/v1.py), prompt [`prompts/facility_v1.md`](../prompts/facility_v1.md), dữ liệu [`app/facility_data/`](../app/facility_data/), test [`tests/test_facility.py`](../tests/test_facility.py).
 
@@ -269,4 +269,4 @@ Team App xác nhận thêm (2026-11-03, nhánh develop, chưa phát hành, vẫn
 
 App phát hành 05/11 trên cả hai store; bản Android 2034 bật `FACILITY_AI`. KAN-118 (phần việc phía App) đã Done.
 
-Còn lại phía AI: đặt `FACILITY_AUDIENCE_COLUMN=true` trên server và tạo lại container.
+Phía AI đã đặt `FACILITY_AUDIENCE_COLUMN=true` trên server và deploy lại (05/11).
