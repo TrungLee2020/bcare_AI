@@ -1,6 +1,8 @@
 # Lịch sử trò chuyện với Bụt: trả lời team App và câu hỏi cho KAN-123
 
-Từ team AI, 2026-11-03.
+Từ team AI, 2026-11-03. Cập nhật 2026-11-05 theo comment của team App trên KAN-130.
+
+> **Cập nhật 2026-11-05.** App đã phát hành (Android 2034, iOS 2042). Chat giờ là một mạch liền, không còn màn Lịch sử riêng; app vẫn gọi `GET /v1/conversations` và `.../messages` đúng hợp đồng. Mục A1 đã ổn: app gửi tối đa 24 tin (23 tin gần nhất + câu hỏi mới). App **chưa** gọi hai API xoá ở A5. Câu đồng ý mới (phiên bản `2026-11-05`) ở B1, dòng dữ liệu trên máy ở B4. Câu đồng ý chưa có phần OpenAI theo B3, vẫn chờ pháp chế.
 
 - **Phần A** trả lời team App về màn Lịch sử trò chuyện. Đặc tả đầy đủ: mục "Lịch sử chat" trong [`docs/v1-app-api.md`](v1-app-api.md) (repo bcare_AI).
 - **Phần B** là các câu hỏi cần pháp chế trả lời cho hồ sơ KAN-123, kèm thông tin dữ liệu phía AI.
@@ -60,7 +62,7 @@ Câu trên màn đồng ý (B3) và việc xử lý lịch sử cũ (B1) có th�
 - Câu đồng ý hiện tại của app nói: *"cuộc trò chuyện không được lưu, đóng app là mất"*.
 - Thực tế, từ khi Trợ lý AI chạy trên production, server **đã lưu** các lượt hỏi-đáp thành công. Server còn lưu bản tóm tắt hội thoại do AI viết, để Bụt nhớ mạch trò chuyện.
 - Phạm vi hiện còn nhỏ: tính năng mới mở cho một nhóm tài khoản (rollout). Số liệu: **[team AI bổ sung: số tài khoản / số hội thoại / ngày lưu đầu tiên]**.
-- Bản app mới đổi câu đồng ý thành "được lưu trên máy chủ của Bụt để bạn xem lại", và hỏi đồng ý lại một lần.
+- Bản app phát hành 05/11/2026 (Android 2034, iOS 2042) đổi câu đồng ý và hỏi đồng ý lại một lần. Câu hiện tại, phiên bản `2026-11-05`: *"Cuộc trò chuyện được lưu trên máy chủ của Bụt để bạn kéo lên xem lại; máy này chỉ giữ vài câu gần nhất để mở nhanh và xoá khi bạn đăng xuất."* Bản `2026-11-03` (chỉ có trên bản develop) cũng nói rõ là có lưu.
 
 **Quy định liên quan**
 - Điều 9 khoản 2 Luật BVDLCN: sự đồng ý chỉ có hiệu lực khi người dùng "biết rõ loại dữ liệu và mục đích xử lý".
@@ -77,7 +79,7 @@ Câu trên màn đồng ý (B3) và việc xử lý lịch sử cũ (B1) có th�
 | 3 | Giữ nguyên, không làm gì | — | Không khuyến nghị |
 
 **Khoảng trống tới ngày phát hành:** người dùng đang dùng bản app cũ vẫn đồng ý với câu "không lưu", nhưng server vẫn tiếp tục lưu. Nếu cần chặn ngay, team AI làm được trong khoảng 1 ngày như sau:
-- Chỉ lưu lịch sử cho người đã đồng ý bản `2026-11-03`.
+- Chỉ lưu lịch sử cho người có `ai_chat_version >= 2026-11-03` (bản `2026-11-03` và `2026-11-05` đều nói có lưu; team App xác nhận 05/11).
 - Với người còn bản cũ, Bụt vẫn nhớ mạch trong lúc trò chuyện, nhưng nội dung không hiện ở màn lịch sử và tự xoá sau 1 ngày.
 
 **Cần pháp chế trả lời**
@@ -144,6 +146,7 @@ Về phía OpenAI:
 | Hàng đợi yêu cầu bị lỗi | Như trên, chỉ với yêu cầu xử lý lỗi | 14 ngày |
 | Bộ nhớ đệm | Câu trả lời 48 giờ; tóm tắt báo cáo tháng 7 ngày | Tự hết hạn |
 | OpenAI (Hoa Kỳ) | Nội dung gửi để sinh câu trả lời | Tới 30 ngày (log giám sát lạm dụng) |
+| Điện thoại của người dùng (app) | 3 tin nhắn gần nhất, để mở chat nhanh | Tới khi người dùng đăng xuất. Không đưa vào bản sao lưu cloud của máy |
 
 - **Hồ sơ sức khoẻ** (khi bật chia sẻ) chỉ dùng cho đúng lượt hỏi đó, **không** lưu vào lịch sử.
 - **Bảo mật:** chỉ người dùng đã đăng nhập mới xem hoặc xoá được lịch sử của chính mình. Cơ sở dữ liệu, hàng đợi và bộ nhớ đệm không mở ra internet.

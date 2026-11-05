@@ -1,6 +1,6 @@
 # Gợi ý cơ sở khám theo triệu chứng (`/v1/facility/suggest`) — KAN-115
 
-**Trạng thái (2026-11-03):** team App đã duyệt hợp đồng (mục 2–4) và làm xong mục 8 (gồm cả `age: null`, `locale`, luồng 429); client nằm sau cờ `FACILITY_AI` của app. Chờ migration `20261102000000_facility_audience_and_fixes.sql` chạy trên production rồi bật `FACILITY_AUDIENCE_COLUMN=true`. Product còn chốt các câu ở mục 7; chỗ nào chưa chốt thì service đang chạy theo đề xuất ghi ở đó.
+**Trạng thái (2026-11-05):** team App đã duyệt hợp đồng (mục 2–4) và làm xong mục 8 (gồm cả `age: null`, `locale`, luồng 429). App phát hành 05/11; bản Android 2034 đã bật cờ `FACILITY_AI`, nên đã có lượt gọi thật. Migration `20261102000000_facility_audience_and_fixes.sql` đã chạy trên production tối 03/11; bên AI cần bật `FACILITY_AUDIENCE_COLUMN=true` trên server. Product còn chốt các câu ở mục 7; chỗ nào chưa chốt thì service đang chạy theo đề xuất ghi ở đó.
 
 Code: [`app/services/facility/`](../app/services/facility/), endpoint trong [`app/api/v1.py`](../app/api/v1.py), prompt [`prompts/facility_v1.md`](../prompts/facility_v1.md), dữ liệu [`app/facility_data/`](../app/facility_data/), test [`tests/test_facility.py`](../tests/test_facility.py).
 
@@ -254,7 +254,7 @@ Từ đối chiếu với bảng mapping tham khảo trong ticket:
 
 Team App đã làm xong (2026-11-02):
 
-1. Migration `20261102000000_facility_audience_and_fixes.sql`: cột `audience` (mặc định `all`), 17 cơ sở `child`, 4 BV Lão khoa `adult`, sửa 43 dòng `is_general`, bỏ `than_kinh` ở 3 BV Tâm thần. **Chưa chạy trên production**; Hiếu chạy xong thì bên AI đặt `FACILITY_AUDIENCE_COLUMN=true` và khởi động lại app.
+1. Migration `20261102000000_facility_audience_and_fixes.sql`: cột `audience` (mặc định `all`), 17 cơ sở `child`, 4 BV Lão khoa `adult`, sửa 43 dòng `is_general`, bỏ `than_kinh` ở 3 BV Tâm thần. **Đã chạy trên production tối 03/11** (Hiếu kiểm lại: 17 cơ sở `child`, 4 BV Lão khoa `adult`).
 2. Key mới `truyen_nhiem` ("Truyền nhiễm – Nhiệt đới") cho 6 BV Nhiệt đới / Truyền nhiễm; bên AI đã thêm làm chuyên khoa phụ của `fever` ở người lớn. Chấp nhận ẩn: Lão khoa, Phục hồi chức năng, Điều dưỡng, điểm xét nghiệm, điểm tiêm phòng, y tế dự phòng, BV Thận Hà Nội, Viện Huyết học. Viện Pháp y Tâm thần `is_active = false`.
 3. Nhãn `than_kinh` là "Nội thần kinh" trong app.
 4. "Tìm cho: Tôi / Trẻ em": "Tôi" gửi tuổi từ hồ sơ, "Trẻ em" nhập 0–16, không lưu.
@@ -267,4 +267,6 @@ Team App xác nhận thêm (2026-11-03, nhánh develop, chưa phát hành, vẫn
 8. Gặp `429 rate_limited` ở lượt có câu gõ: đã chọn thẻ → nút "Tìm bằng thẻ đã chọn" gửi lại **không có `text`** (lượt này không gọi model nên không bị 429); chưa chọn thẻ → nút "Chọn thẻ triệu chứng" xoá câu gõ, về khung nhập. Lượt chỉ có thẻ mà vẫn 429 (chỉ có thể là rate limit của nginx) thì app chỉ báo hết lượt.
 9. Thời gian chờ 30 giây. `emergency`, `radius_km` kèm `clarify_choice`, `id` giữ nguyên như hợp đồng.
 
-Còn chờ: Hiếu báo đã chạy migration `20261102000000_facility_audience_and_fixes.sql` trên production → bên AI đặt `FACILITY_AUDIENCE_COLUMN=true` và tạo lại container.
+App phát hành 05/11 trên cả hai store; bản Android 2034 bật `FACILITY_AI`. KAN-118 (phần việc phía App) đã Done.
+
+Còn lại phía AI: đặt `FACILITY_AUDIENCE_COLUMN=true` trên server và tạo lại container.
