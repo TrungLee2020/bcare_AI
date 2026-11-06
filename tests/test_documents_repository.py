@@ -36,15 +36,17 @@ async def test_find_by_hash_ignores_deleted(db_maker):
 
 async def test_reopen_retries_failed_but_not_done(db_maker):
     conversation = uuid4()
-    failed, done = await make(), await make()
+    failed, done, stuck = await make(), await make(), await make()
     async with db_session() as db:
         await repo.set_status(db, failed, "quota_exceeded")
         await repo.set_status(db, done, "done")
+        await repo.set_status(db, stuck, "processing")
     async with db_session() as db:
-        for document_id in (failed, done):
+        for document_id in (failed, done, stuck):
             await repo.reopen(db, await repo.get_document(db, document_id), conversation)
     async with db_session() as db:
         assert (await repo.get_document(db, failed)).status == "received"
+        assert (await repo.get_document(db, stuck)).status == "received"
         assert (await repo.get_document(db, done)).status == "done"
         assert (await repo.get_document(db, done)).conversation_id == conversation
 

@@ -103,12 +103,23 @@ async def test_daily_limit(db_maker, redis, vision, monkeypatch):
     assert vision.names().count("document_extraction") == 1
 
 
-async def test_extraction_error_refunds_quota(db_maker, redis, vision, monkeypatch):
+async def test_extraction_error_refunds_quota(db_maker, redis, vision):
     vision.extract_error = RuntimeError("model down")
     document_id = await new_document(redis)
     assert await pipeline.process(redis, document_id) == "failed"
     doc, _, _ = await load(document_id)
     assert doc.meta["reason"] == "model_error"
+    assert await ocr_used(redis) == 0
+
+
+async def test_save_error_refunds_quota_and_propagates(db_maker, redis, vision, monkeypatch):
+    async def boom(*args, **kwargs):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(repo, "save_results", boom)
+    document_id = await new_document(redis)
+    with pytest.raises(RuntimeError):
+        await pipeline.process(redis, document_id)
     assert await ocr_used(redis) == 0
 
 

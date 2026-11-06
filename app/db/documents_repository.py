@@ -10,7 +10,9 @@ from app.db.models import HealthDocument, HealthDocumentExtraction, HealthDocume
 
 FINAL_STATUSES = frozenset({"done", "skipped", "unreadable", "quota_exceeded", "failed"})
 # Gửi lại đúng ảnh này thì đọc lại: chụp lại rõ hơn, hoặc hôm sau còn hạn mức.
-RETRYABLE_STATUSES = frozenset({"unreadable", "quota_exceeded", "failed"})
+# Cả "processing" (worker chết giữa chừng): an toàn vì Kafka chia partition theo
+# user_id nên tin của một user chạy tuần tự, gửi lại không đua với lần chạy cũ.
+RETRYABLE_STATUSES = frozenset({"processing", "unreadable", "quota_exceeded", "failed"})
 
 
 def _now() -> datetime:

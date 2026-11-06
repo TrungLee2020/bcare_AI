@@ -140,20 +140,25 @@ async def process(redis: Redis, document_id: UUID) -> str:
     data_dict = extraction.model_dump()
     ocr_text = data_dict.pop("ocr_text")
     doc_date = _parse_date(data_dict.get("doc_date"))
-    async with db_session() as db:
-        await repo.save_results(
-            db,
-            document_id,
-            ocr_text=ocr_text,
-            extraction=data_dict,
-            schema_version=SCHEMA_VERSION,
-            model=model,
-            title=build_title(found.doc_type, data_dict.get("facility"), doc_date),
-            doc_date=doc_date,
-            doc_type=found.doc_type,
-            confidence=found.confidence,
-            meta=meta,
-        )
+    try:
+        async with db_session() as db:
+            await repo.save_results(
+                db,
+                document_id,
+                ocr_text=ocr_text,
+                extraction=data_dict,
+                schema_version=SCHEMA_VERSION,
+                model=model,
+                title=build_title(found.doc_type, data_dict.get("facility"), doc_date),
+                doc_date=doc_date,
+                doc_type=found.doc_type,
+                confidence=found.confidence,
+                meta=meta,
+            )
+    except Exception:
+        # Lưu lỗi thì chưa có kết quả: hoàn lượt để lần giao lại không bị trừ hai lần.
+        await quota.refund_daily(redis, OCR_QUOTA_PREFIX, user_id)
+        raise
     await redis.delete(image_key(document_id))
     metrics.incr("ocr_done")
     logger.info("Tài liệu %s → done (%s)", document_id, found.doc_type)
