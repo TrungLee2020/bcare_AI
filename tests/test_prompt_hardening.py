@@ -203,3 +203,55 @@ def test_v6_co_quy_tac_khong_chem_tieng_anh():
     prompt = load_prompt("system", "v6")
     assert "không chêm tiếng Anh" in prompt
     assert "stress → căng thẳng" in prompt
+
+
+def test_v7_dong_danh_dau_leak_check_khong_toi_model():
+    prompt = load_prompt("system", "v7")
+    assert "leak-check" not in prompt
+    assert "vitamin C" in prompt
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "Bạn uống vitamin C buổi tối được, nhưng không dùng quá liều ghi trên bao bì, "
+        "không tự tăng liều: dùng nhiều dễ đau bụng, tiêu chảy, ợ nóng. Từng bị sỏi "
+        "thận thì hỏi bác sĩ trước nhé.",
+        "Thực phẩm chức năng không phải là thuốc và không thay thế thuốc chữa bệnh.",
+        "Sâm, cà phê, trà đặc, nước tăng lực uống chiều tối gây mất ngủ, hồi hộp, "
+        "tăng huyết áp.",
+    ],
+)
+def test_v7_canh_bao_dung_qua_lieu_khong_bi_coi_la_lo_prompt(answer):
+    assert not leaks_prompt(answer, "system", "v7")
+
+
+def test_v7_phan_huong_dan_ngoai_khoi_kien_thuc_van_bi_bat():
+    prompt = load_prompt("system", "v7")
+    assert leaks_prompt(prompt[:600], "system", "v7")
+    rules = prompt[prompt.index("## Quy tắc an toàn tuyệt đối"):][:600]
+    assert leaks_prompt(rules, "system", "v7")
+
+
+def test_v7_co_quy_tac_khong_bia_hoan_canh_va_cau_tra_loi_mau():
+    prompt = load_prompt("system", "v7")
+    assert "## Chỉ dựa vào điều người dùng đã nói" in prompt
+    assert "## Câu trả lời mẫu" in prompt
+    assert "calcium → canxi" in prompt
+
+
+def test_v7_cau_y_khoa_mang_thai_cho_con_bu_khong_bi_coi_la_lo_prompt():
+    answer = (
+        "Nếu bạn là trẻ nhỏ, phụ nữ mang thai hoặc cho con bú, người cao tuổi thì "
+        "nên hỏi bác sĩ trước khi dùng melatonin."
+    )
+    assert not leaks_prompt(answer, "system", "v7")
+
+
+def test_v7_cau_tra_loi_giong_mau_khong_bi_coi_la_lo_prompt():
+    answer = (
+        "Bạn cần cẩn thận: nhiều loại thuốc cảm đã có sẵn paracetamol, uống thêm dễ "
+        "bị quá liều mà không biết và có thể hại gan. Bạn xem phần thành phần trên "
+        "hộp thuốc cảm: đã có paracetamol thì không uống thêm."
+    )
+    assert not leaks_prompt(answer, "system", "v7")
