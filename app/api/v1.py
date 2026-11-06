@@ -62,7 +62,7 @@ from app.schemas import (
 from app.services import consent, cost, idempotency, openai_client, output_validator, quota, rollout, smalltalk
 from app.services.facility import facilities
 from app.services.facility import suggest as facility_suggest_service
-from app.services.documents import intake
+from app.services.documents import intake, pipeline as documents_pipeline
 from app.services.documents import replies as documents_replies
 from app.services.documents import storage as documents_storage
 from app.sse import hub
@@ -315,7 +315,8 @@ def _json_body(answer: ChatAnswer, conversation_id: UUID, quota_remaining: int |
     return body
 
 
-async def _accept_attachments(payload: V1ChatRequest, principal: Principal, granted: consent.Consent, request: Request, conversation_id: UUID) -> list[dict]:
+async def _accept_attachments(payload: V1ChatRequest, principal: Principal, granted: consent.Consent, request: Request, conversation_id: UUID, accepted_ids: list[UUID]) -> list[dict]:
+    """`accepted_ids` được điền dần: nếu một ảnh sau bị từ chối, nơi gọi biết ảnh nào đã ghi."""
     if not settings.ocr_enabled:
         raise V1Error(403, "not_enabled", "Tính năng gửi ảnh giấy tờ chưa được mở.")
     if len(payload.attachments) > settings.ocr_max_attachments:
@@ -329,6 +330,12 @@ async def _accept_attachments(payload: V1ChatRequest, principal: Principal, gran
             403, "consent_required", "Bạn cần đồng ý chia sẻ hồ sơ sức khoẻ để Bụt đọc và lưu giấy tờ.",
             consent="share_profile",
         )
+    # Kiểm quyền sở hữu mọi đường dẫn TRƯỚC khi nhận ảnh nào, để ảnh đầu không
+    # bị ghi lại khi ảnh sau bị từ chối 403.
+    for attachment in payload.attachments:
+        if not documents_storage.is_owned(attachment.path, principal.user_id):
+            metrics.incr("v1_documents_rejected_forbidden")
+            raise V1Error(403, "forbidden", "Ảnh không thuộc tài khoản của bạn.")
     documents: dict[str, dict] = {}
     for attachment in payload.attachments:
         try:
@@ -346,6 +353,7 @@ async def _accept_attachments(payload: V1ChatRequest, principal: Principal, gran
         except Exception as exc:
             logger.exception("Nhận ảnh thất bại user_id=%s", principal.user_id)
             raise V1Error(503, "unavailable", "Hệ thống đang bận, vui lòng thử lại sau ít phút.") from exc
+        accepted_ids.append(accepted.document_id)
         documents[str(accepted.document_id)] = {"id": str(accepted.document_id), "status": accepted.status}
     metrics.incr("v1_documents_accepted", len(documents))
     return list(documents.values())
@@ -370,6 +378,7 @@ async def _documents_only(request: Request, principal: Principal, conversation_i
             )
         except Exception as exc:
             await idempotency.release(redis, request_id)
+            await documents_pipeline.fail_unfinished([UUID(d["id"]) for d in documents], "request_failed")
             metrics.incr("v1_enqueue_failed")
             logger.exception("Enqueue ảnh thất bại request_id=%s", request_id)
             raise V1Error(503, "unavailable", "Hệ thống đang bận, vui lòng thử lại sau ít phút.") from exc
@@ -408,8 +417,13 @@ async def chat(payload: V1ChatRequest, request: Request):
         return _respond_now(request, answer, conversation_id, None)
 
     documents: list[dict] = []
+    accepted_ids: list[UUID] = []
     if payload.attachments:
-        documents = await _accept_attachments(payload, principal, granted, request, conversation_id)
+        try:
+            documents = await _accept_attachments(payload, principal, granted, request, conversation_id, accepted_ids)
+        except Exception:
+            await documents_pipeline.fail_unfinished(accepted_ids, "request_failed")
+            raise
         if not question:
             return await _documents_only(request, principal, conversation_id, documents)
 
@@ -430,8 +444,11 @@ async def chat(payload: V1ChatRequest, request: Request):
             render_health_context(payload.health_context) if granted.share_profile else None,
             [UUID(d["id"]) for d in documents],
         )
-    except BaseException:
+    except BaseException as exc:
         hub.unsubscribe(principal.user_id, queue)
+        if isinstance(exc, Exception):
+            # Chưa tới Kafka (hết lượt / publish lỗi): đừng để ảnh treo ở "received".
+            await documents_pipeline.fail_unfinished(accepted_ids, "request_failed")
         raise
 
     if _wants_sse(request):

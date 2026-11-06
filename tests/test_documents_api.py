@@ -219,3 +219,58 @@ async def test_conversation_started_by_image_has_a_title(client, db_maker):
         )
     listed = (await client.get("/v1/conversations", headers=auth())).json()
     assert listed["conversations"][0]["title"] == "Ảnh giấy tờ"
+
+
+async def _status(document_id) -> tuple[str, dict]:
+    from uuid import UUID
+
+    async with db_session() as db:
+        doc = await repo.get_document(db, UUID(str(document_id)))
+        return doc.status, dict(doc.meta or {})
+
+
+async def _all_documents(client):
+    return (await client.get("/v1/documents", headers=auth())).json()["documents"]
+
+
+async def test_quota_exceeded_fails_accepted_documents(client, files, kafka, monkeypatch):
+    monkeypatch.setattr(settings, "quota_free_per_day", 0)
+    files.objects[f"{USER}/a.jpg"] = jpeg()
+    resp = await client.post("/v1/chat", json=with_images(f"{USER}/a.jpg", text="đơn này sao"), headers={**auth(), **JSON})
+    assert (resp.status_code, resp.json()["error"]) == (429, "quota_exceeded")
+    [doc] = await _all_documents(client)
+    status, meta = await _status(doc["id"])
+    assert status == "failed"
+    assert meta.get("reason") == "request_failed"
+
+
+async def test_forbidden_second_path_leaves_no_document(client, files, kafka):
+    files.objects[f"{USER}/a.jpg"] = jpeg()
+    resp = await client.post("/v1/chat", json=with_images(f"{USER}/a.jpg", "someone-else/b.jpg"), headers={**auth(), **JSON})
+    assert (resp.status_code, resp.json()["error"]) == (403, "forbidden")
+    assert await _all_documents(client) == []
+
+
+async def test_publish_failure_on_image_only_fails_document(client, files, kafka):
+    files.objects[f"{USER}/a.jpg"] = jpeg()
+    kafka.fail = True
+    resp = await client.post("/v1/chat", json=with_images(f"{USER}/a.jpg"), headers={**auth(), **JSON})
+    assert (resp.status_code, resp.json()["error"]) == (503, "unavailable")
+    [doc] = await _all_documents(client)
+    assert (await _status(doc["id"]))[0] == "failed"
+
+
+async def test_done_duplicate_is_not_downgraded(client, files, kafka, monkeypatch):
+    files.objects[f"{USER}/a.jpg"] = jpeg()
+    files.objects[f"{USER}/b.jpg"] = jpeg()
+    first = (await client.post("/v1/chat", json=with_images(f"{USER}/a.jpg"), headers={**auth(), **JSON})).json()
+    document_id = first["documents"][0]["id"]
+    async with db_session() as db:
+        await repo.save_results(
+            db, kafka.published[0].document_ids[0], ocr_text="x", extraction={}, schema_version="1", model="m",
+            title="t", doc_date=None, doc_type="prescription", confidence=0.9, meta={},
+        )
+    monkeypatch.setattr(settings, "quota_free_per_day", 0)
+    resp = await client.post("/v1/chat", json=with_images(f"{USER}/b.jpg", text="hỏi"), headers={**auth(), **JSON})
+    assert (resp.status_code, resp.json()["error"]) == (429, "quota_exceeded")
+    assert (await _status(document_id))[0] == "done"
