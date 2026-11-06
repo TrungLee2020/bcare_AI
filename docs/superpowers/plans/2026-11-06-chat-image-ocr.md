@@ -142,7 +142,8 @@ def test_resize_never_upscales():
 
 
 def test_prepare_returns_small_jpeg_data_url():
-    data = encode(paper_on_table(size=(3000, 2400), paper=(600, 300, 2400, 2100)))
+    # PNG: nén JPEG làm nhiễu mép giấy, lệch kích thước sau cắt viền.
+    data = encode(paper_on_table(size=(3000, 2400), paper=(600, 300, 2400, 2100)), "PNG")
     prepared = image.prepare(data, 512, 0.2)
     assert prepared.data_url.startswith("data:image/jpeg;base64,")
     decoded = Image.open(io.BytesIO(base64.b64decode(prepared.data_url.split(",", 1)[1])))
@@ -380,7 +381,11 @@ async def test_save_results_keeps_extraction_history(db_maker):
 async def test_list_documents_newest_first_with_cursor_and_type(db_maker):
     first, second = await make(), await make()
     async with db_session() as db:
+        # Đặt thời điểm tường minh: hai bản ghi tạo liền nhau có thể trùng giờ.
+        older = await repo.get_document(db, first)
+        (await repo.get_document(db, second)).created_at = older.created_at + timedelta(seconds=1)
         await repo.set_status(db, first, "done", doc_type="lab_result")
+    async with db_session() as db:
         page = await repo.list_documents(db, "u1", 1)
         assert [d.id for d in page] == [second]
         older = await repo.list_documents(db, "u1", 10, before=page[0].created_at)
@@ -1584,7 +1589,6 @@ Tạo `tests/test_documents_pipeline.py`:
 import io
 from uuid import uuid4
 
-import openai
 import pytest
 from PIL import Image
 
@@ -1688,8 +1692,7 @@ async def test_daily_limit(db_maker, redis, vision, monkeypatch):
 
 
 async def test_extraction_error_refunds_quota(db_maker, redis, vision, monkeypatch):
-    monkeypatch.setattr(settings, "openai_max_attempts", 1)
-    vision.extract_error = openai.APIConnectionError(request=None)
+    vision.extract_error = RuntimeError("model down")
     document_id = await new_document(redis)
     assert await pipeline.process(redis, document_id) == "failed"
     doc, _, _ = await load(document_id)
@@ -1721,7 +1724,6 @@ def test_build_title_skips_missing_parts():
     assert pipeline.build_title("lab_result", None, None) == "Kết quả xét nghiệm"
 ```
 
-Lưu ý: `openai.APIConnectionError(request=None)` cần một `httpx.Request` trên một số bản SDK. Nếu lỗi khởi tạo, dùng `openai.APIConnectionError(request=httpx.Request("POST", "https://api.openai.com"))` (thêm `import httpx`).
 
 - [ ] **Step 3: Chạy test, phải đỏ**
 
@@ -1998,8 +2000,9 @@ async def test_answering_drops_document_context_that_looks_like_injection():
         await answering.answer_question(message("đơn này là gì"), document_context=BLOCKED_BY_FILTER[0])
     finally:
         openai_client.set_openai(None)
-    sent = "\n".join(str(m["content"]) for m in fake.calls[0]["messages"])
-    assert "document_data" not in sent
+    # Bỏ system prompt: v7 có nhắc tên thẻ <document_data> trong hướng dẫn.
+    sent = "\n".join(str(m["content"]) for m in fake.calls[0]["messages"][1:])
+    assert "<document_data>" not in sent
 
 
 async def test_documents_only_message_is_processed_and_recorded_without_reply(db_maker, delivered, processed):
@@ -2523,16 +2526,16 @@ async def test_documents_rejects_bad_type_and_cursor(client):
 async def test_conversation_started_by_image_has_a_title(client, db_maker):
     from uuid import uuid4
 
+    session_id = uuid4()
     async with db_session() as db:
+        await repository.ensure_session(db, session_id, USER)
         await repository.save_turn(
-            db, session_id=uuid4(), user_id=USER, request_id=uuid4(), question="",
+            db, session_id=session_id, user_id=USER, request_id=uuid4(), question="",
             answer="Bụt đã nhận 1 ảnh", meta={}, user_meta={"documents": ["x"]},
         )
     listed = (await client.get("/v1/conversations", headers=auth())).json()
     assert listed["conversations"][0]["title"] == "Ảnh giấy tờ"
 ```
-
-Lưu ý: `repository.save_turn` cần phiên đã tồn tại (khoá ngoại). Nếu test cuối đỏ vì khoá ngoại, gọi `await repository.ensure_session(db, session_id, USER)` trước `save_turn` với cùng `session_id`.
 
 - [ ] **Step 2: Chạy test, phải đỏ**
 
