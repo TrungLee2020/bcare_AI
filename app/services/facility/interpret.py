@@ -42,7 +42,7 @@ def emergency_from_keywords(text: str) -> str:
 
 
 def _symptom_enum() -> type[enum.Enum]:
-    keys = list(catalog.symptom_tags())
+    keys = list(catalog.all_symptoms())
     return enum.Enum("SymptomKey", {k: k for k in keys}, type=str)
 
 
@@ -93,22 +93,51 @@ def _grounded(phrase: str, text_norm: str) -> bool:
 
 
 def verify(raw: BaseModel, text: str) -> Interpretation:
-    """Giữ lại những gì có căn cứ trong câu gõ."""
+    """Giữ lại những gì có căn cứ trong câu gõ, rồi đối chiếu nguyên chữ."""
     text_norm = normalize(text)
     symptoms: list[tuple[str, str]] = []
+
+    def add(key: str, matched: str) -> None:
+        if key not in (k for k, _ in symptoms):
+            symptoms.append((key, matched.strip()[:MAX_PHRASE_CHARS]))
+
     for item in raw.symptoms:
         key = item.key.value if isinstance(item.key, enum.Enum) else str(item.key)
-        if key in catalog.symptom_tags() and _grounded(item.matched_text, text_norm):
-            if key not in (k for k, _ in symptoms):
-                symptoms.append((key, item.matched_text.strip()[:MAX_PHRASE_CHARS]))
-    unmapped = [
-        p.strip()[:MAX_PHRASE_CHARS]
-        for p in raw.unmapped
-        if _grounded(p, text_norm)
-    ][:MAX_UNMAPPED]
+        if key not in catalog.all_symptoms() or not _grounded(item.matched_text, text_norm):
+            continue
+        # Căn cứ của model khớp trọn một cụm trong bảng mà không phải của key
+        # model chọn → tin bảng ("dau da day" là đau bụng, không phải đau đầu;
+        # "bong gân cổ chân" là chấn thương, không phải đau khớp). Căn cứ không
+        # khớp cụm nào (model hiểu theo nghĩa) thì giữ key của model.
+        literal = catalog.literal_matches(item.matched_text)
+        if literal and key not in (k for k, _ in literal):
+            for lit_key, lit_text in literal:
+                add(lit_key, lit_text)
+        else:
+            add(key, item.matched_text)
+
+    # Cụm khớp trọn tên / từ đồng nghĩa mà model bỏ sót.
+    for key, matched in catalog.literal_matches(text):
+        add(key, matched)
+
+    matched_norm = [normalize(m) for _, m in symptoms]
+    unmapped = []
+    for phrase in raw.unmapped:
+        phrase_norm = normalize(phrase)
+        if not _grounded(phrase, text_norm):
+            continue
+        # Đã có trong bảng, đã nằm trong một triệu chứng đã nhận, hoặc đã được
+        # xử lý bằng cờ: không phải "chưa map", không log, không hiện ghi chú.
+        if catalog.literal_matches(phrase):
+            continue
+        if any(phrase_norm in m or m in phrase_norm for m in matched_norm):
+            continue
+        if raw.ambiguous_neuro and "than kinh" in phrase_norm:
+            continue
+        unmapped.append(phrase.strip()[:MAX_PHRASE_CHARS])
     return Interpretation(
         symptoms=symptoms,
-        unmapped=unmapped,
+        unmapped=unmapped[:MAX_UNMAPPED],
         after_trauma=raw.after_trauma,
         mental_health=raw.mental_health,
         ambiguous_neuro=raw.ambiguous_neuro,
@@ -117,9 +146,9 @@ def verify(raw: BaseModel, text: str) -> Interpretation:
 
 
 def tag_table() -> str:
-    """Danh sách thẻ đưa vào system prompt: key, tên, từ đồng nghĩa."""
+    """Danh sách triệu chứng đưa vào system prompt: key, tên, từ đồng nghĩa."""
     lines = []
-    for key, tag in catalog.symptom_tags().items():
+    for key, tag in catalog.all_symptoms().items():
         synonyms = ", ".join(tag.get("synonyms", []))
         lines.append(f"- {key}: {tag['name']} ({synonyms})")
     return "\n".join(lines)

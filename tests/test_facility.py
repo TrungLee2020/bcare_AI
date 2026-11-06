@@ -232,11 +232,11 @@ def interp(**overrides):
 def test_verify_drops_symptoms_without_grounding():
     raw = interp(
         symptoms=[{"key": "headache", "matched_text": "nhức đầu"}, {"key": "fever", "matched_text": "sốt cao"}],
-        unmapped=["đau răng", "bịa thêm"],
+        unmapped=["đau gót chân", "bịa thêm"],
     )
-    result = verify(raw, "Nhuc dau va dau rang")
+    result = verify(raw, "Nhuc dau va dau got chan")
     assert result.symptoms == [("headache", "nhức đầu")]
-    assert result.unmapped == ["đau răng"]
+    assert result.unmapped == ["đau gót chân"]
 
 
 # --- API ----------------------------------------------------------------------
@@ -388,10 +388,10 @@ async def test_api_ambiguous_neuro_asks_then_uses_choice(client, supabase, llm):
 
 @pytest.mark.asyncio
 async def test_api_unmapped_text_gives_general_with_note(client, supabase, llm):
-    llm.result = interp(unmapped=["đau răng"])
-    data = (await suggest(client, text="đau răng quá")).json()
+    llm.result = interp(unmapped=["đau gót chân"])
+    data = (await suggest(client, text="đau gót chân quá")).json()
     assert data["status"] == "ok"
-    assert data["interpretation"]["unmapped_text"] == ["đau răng"]
+    assert data["interpretation"]["unmapped_text"] == ["đau gót chân"]
     assert "đa khoa" in data["interpretation"]["note"]
     assert {f["match"] for f in data["facilities"]} == {"general"}
 
@@ -516,3 +516,102 @@ async def test_api_locale_en_accepted_answers_in_vietnamese(client, supabase, ll
     resp = await suggest(client, symptom_tags=["headache"], locale="en")
     assert resp.status_code == 200
     assert resp.json()["interpretation"]["specialties"][0]["label"] == "Nội thần kinh"
+
+
+# --- Triệu chứng bổ sung + đối chiếu nguyên chữ (KAN-115, 2026-11-06) ----------
+
+def test_extra_symptoms_use_known_keys_and_do_not_clash_with_app_tags():
+    known = set(catalog.specialties()) | {catalog.GENERAL}
+    assert not set(catalog.extra_symptoms()) & set(catalog.symptom_tags())
+    for item in catalog.extra_symptoms().values():
+        for group in ("adult", "child"):
+            entry = item["map"][group]
+            assert entry["primary"], item["key"]
+            assert set(entry["primary"]) | set(entry["secondary"]) <= known, item["key"]
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("dau da day", [("abdominal_pain", "dau da day")]),
+        ("đau đầu gối khi leo cầu thang", [("joint_pain", "đau đầu gối")]),
+        ("sổ mũi, rát họng", [("stuffy_nose", "sổ mũi"), ("sore_throat", "rát họng")]),
+        ("Trầm cảm", [("mental", "Trầm cảm")]),
+        ("đau răng mấy hôm", [("toothache", "đau răng")]),
+        ("không sốt nhưng ho", [("cough", "ho")]),
+        ("không sốt ho", []),
+        ("hết ho rồi, giờ đau họng", [("sore_throat", "đau họng")]),
+        # cụm một từ phải khớp cả dấu; câu không dấu thì để model đọc
+        ("họ bảo tôi bị ho", [("cough", "ho")]),
+        ("ho bao toi bi sot", []),
+        ("mẹ ơi", []),
+    ],
+)
+def test_literal_matches(text, expected):
+    assert catalog.literal_matches(text) == expected
+
+
+def test_extra_symptoms_map_to_their_specialty():
+    assert list(catalog.map_symptoms(["toothache"], "adult").specialties) == ["rang_ham_mat"]
+    assert list(catalog.map_symptoms(["menstrual"], "adult").specialties) == ["san"]
+    injury = catalog.map_symptoms(["injury"], "adult").specialties
+    assert injury["ngoai_chan_thuong"].role == "primary"
+    assert injury["co_xuong_khop"].role == "secondary"
+
+
+def test_verify_phrase_handled_by_mental_flag_is_not_unmapped():
+    """Log production 2026-11-05: 'Trầm cảm' bị log facility_unmapped dù đã gợi
+    ý đúng Tâm thần, và app hiện ghi chú 'chưa có trong bảng'."""
+    raw = interp(mental_health=True, unmapped=["Trầm cảm"])
+    result = verify(raw, "Trầm cảm")
+    assert result.unmapped == []
+    assert result.symptoms == [("mental", "Trầm cảm")]
+
+
+def test_verify_synonym_put_in_unmapped_becomes_symptom():
+    raw = interp(symptoms=[{"key": "sore_throat", "matched_text": "rát họng"}], unmapped=["sổ mũi"])
+    result = verify(raw, "sổ mũi, rát họng")
+    assert result.symptoms == [("sore_throat", "rát họng"), ("stuffy_nose", "sổ mũi")]
+    assert result.unmapped == []
+
+
+def test_verify_table_beats_model_when_grounding_is_a_listed_phrase():
+    raw = interp(symptoms=[{"key": "headache", "matched_text": "dau da day"}])
+    assert verify(raw, "dau da day").symptoms == [("abdominal_pain", "dau da day")]
+
+
+def test_verify_keeps_model_key_when_grounding_is_a_paraphrase():
+    raw = interp(symptoms=[{"key": "headache", "matched_text": "đầu như búa bổ"}])
+    assert verify(raw, "đầu như búa bổ").symptoms == [("headache", "đầu như búa bổ")]
+
+
+def test_verify_ambiguous_neuro_phrase_is_not_unmapped():
+    raw = interp(ambiguous_neuro=True, unmapped=["khám thần kinh"])
+    assert verify(raw, "tôi muốn khám thần kinh").unmapped == []
+
+
+@pytest.mark.asyncio
+async def test_api_mental_phrase_has_no_unmapped_note(client, supabase, llm):
+    llm.result = interp(mental_health=True, unmapped=["Trầm cảm"])
+    data = (await suggest(client, text="Trầm cảm")).json()
+    assert data["interpretation"]["unmapped_text"] == []
+    assert data["interpretation"]["note"] is None
+    assert [s["key"] for s in data["interpretation"]["specialties"]] == ["tam_than"]
+    names = [s["name"] for s in data["interpretation"]["symptoms"]]
+    assert names == ["Vấn đề tâm lý"]
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # bỏ dấu thì trùng nhau: câu có dấu khớp đúng, câu không dấu để model đọc
+        ("hết đau bụng rồi, giờ bị tiêu chảy", [("diarrhea", "tiêu chảy")]),
+        ("khó tiêu", [("bloating", "khó tiêu")]),
+        ("khó tiểu", [("urinary", "khó tiểu")]),
+        ("kho tieu", []),
+        ("đỏ mắt", [("eye_pain", "đỏ mắt")]),
+        ("do mat", []),
+    ],
+)
+def test_literal_matches_accent_collisions(text, expected):
+    assert catalog.literal_matches(text) == expected
