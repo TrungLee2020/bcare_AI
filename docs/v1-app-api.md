@@ -116,6 +116,95 @@ data: {"type":"done","conversation_id":"…","should_see_doctor":false,"follow_u
 {"reply":"…","conversation_id":"…","should_see_doctor":false,"follow_up_questions":[],"quota_remaining":1}
 ```
 
+## Ảnh giấy tờ y tế (OCR)
+
+Thiết kế đầy đủ: [docs/superpowers/specs/2026-11-06-chat-image-ocr-design.md](superpowers/specs/2026-11-06-chat-image-ocr-design.md).
+
+App upload ảnh lên Supabase Storage (bucket `health-documents`, đường dẫn `<user_id>/<uuid>.jpg`) rồi gửi đường dẫn trong `POST /v1/chat`. Backend tải ảnh bằng token của user, phân loại, đọc chữ, trích xuất và lưu. Chỉ xử lý khi user đã đồng ý `ai_chat` **và** `ai_share_profile`. Tính năng bật bằng `OCR_ENABLED`.
+
+### `attachments` trong `POST /v1/chat`
+
+```json
+{
+  "messages": [{"role": "user", "content": "Đơn thuốc này uống thế nào?"}],
+  "attachments": [{"path": "<user_id>/<uuid>.jpg", "profile_id": null}]
+}
+```
+
+- Tối đa 3 ảnh mỗi tin (`OCR_MAX_ATTACHMENTS`). `profile_id` là chuỗi app tự định nghĩa (thành viên gia đình), `null` = chủ tài khoản.
+- Ảnh phải là JPEG, PNG hoặc WebP thuần, tối đa 10 MB.
+- Tin chỉ có ảnh (`content` rỗng): **không gọi model chat, không trừ lượt chat**, API trả ngay câu cố định.
+- Response JSON và event `done` (SSE) có thêm `documents`:
+
+```json
+{"reply":"…","conversation_id":"…","quota_remaining":1,"documents":[{"id":"uuid","status":"received"}]}
+```
+
+```
+data: {"type":"done","conversation_id":"…","documents":[{"id":"uuid","status":"received"}],"quota_remaining":1,…}
+```
+
+Các ảnh của một tin được đọc song song, tổng thời gian tối đa `OCR_MESSAGE_BUDGET_SECONDS` (45 giây). Ảnh chưa đọc xong khi hết giờ chuyển thành `failed`; user gửi lại ảnh đó để đọc lại.
+
+Nếu request có ảnh thất bại sau khi đã nhận ảnh (429 hết lượt, 403/422 ở ảnh sau, 503), các tài liệu đã nhận được đánh dấu `failed`. Gửi lại đúng ảnh đó thì được đọc lại.
+
+### `GET /v1/documents?type=&limit=&cursor=`
+
+Tài liệu chưa xoá của user, mới trước. `type`: `prescription`, `lab_result`, `medical_record`, `imaging_report`, `imaging_film`, `other_medical`, `not_medical`. `limit` mặc định 20, tối đa 50. `cursor` = `next_cursor` của trang trước, **app phải URL-encode** (có dấu `+` và `:`).
+
+```json
+{
+  "documents": [
+    {"id":"uuid","doc_type":"prescription","title":"Đơn thuốc – Bệnh viện Đa khoa – 03/11/2026","doc_date":"2026-11-03","status":"done","storage_path":"<user_id>/<uuid>.jpg","profile_id":null,"created_at":"2026-11-06T03:12:44+00:00"}
+  ],
+  "next_cursor": null
+}
+```
+
+App tự lấy ảnh từ Storage bằng `storage_path`.
+
+### `GET /v1/documents/{id}`
+
+Như một mục ở trên, thêm `ocr_text`, `extraction` (bản trích xuất mới nhất, theo từng loại, xem spec mục 5) và `uncertain_fields` (đường dẫn các trường model không chắc, app nên đánh dấu). Tài liệu của người khác hoặc đã xoá: `404 not_found`.
+
+```json
+{"id":"uuid","doc_type":"lab_result","status":"done","ocr_text":"…","extraction":{"doc_date":"2026-11-01","tests":[{"name":"Glucose","value":"7.8","unit":"mmol/L","reference_range":"3.9 - 6.4","flag_as_printed":"H"}],"uncertain_fields":[]},"uncertain_fields":[],"…":"…"}
+```
+
+### `DELETE /v1/documents/{id}`
+
+Ẩn ngay và xoá ảnh trên Storage bằng token user, trả `204`. Bản ghi DB bị xoá hẳn sau `HISTORY_PURGE_AFTER_DAYS` ngày. Xoá hội thoại không xoá tài liệu.
+
+### Trạng thái (`status`)
+
+| `status` | Ý nghĩa | Trừ hạn mức ảnh |
+|---|---|---|
+| `received` | Đã nhận, chưa đọc | không |
+| `processing` | Đang đọc | không |
+| `done` | Đã đọc và trích xuất | có |
+| `skipped` | Không phải giấy tờ y tế, hoặc phim chụp (chỉ phân loại, lưu, không đọc) | không |
+| `unreadable` | Ảnh mờ / không đọc được, nên chụp lại | không |
+| `quota_exceeded` | Hết `OCR_MAX_PER_DAY` (3 ảnh/ngày) | không |
+| `failed` | Lỗi model, hết `OCR_MESSAGE_BUDGET_SECONDS`, hoặc request thất bại sau khi nhận ảnh; gửi lại để đọc lại | không (hoàn nếu đã trừ) |
+
+### Lỗi riêng cho ảnh
+
+| HTTP | `error` | Khi nào |
+|---|---|---|
+| 403 | `not_enabled` | `OCR_ENABLED` tắt mà tin có `attachments` |
+| 403 | `consent_required` kèm `"consent": "share_profile"` | Chưa đồng ý chia sẻ hồ sơ: App hiện popup chia sẻ |
+| 403 | `forbidden` | `path` không thuộc `<user_id>` của token |
+| 422 | `invalid_attachment` | Không tìm thấy ảnh, không phải JPEG/PNG/WebP thuần, quá 10 MB |
+| 422 | `invalid_request` kèm `max_attachments` | Quá số ảnh mỗi tin |
+
+### Việc của team App
+
+1. Tạo bucket riêng tư `health-documents`; policy: user chỉ đọc / ghi / xoá object dưới `{auth.uid()}/`.
+2. Trước khi upload, **re-encode mọi ảnh thành JPEG thuần**: chuyển HEIC sang JPEG, xoá EXIF, thu nhỏ cạnh dài tối đa 2048 px. JPEG chụp từ điện thoại mà Pillow nhận là "MPO" bị từ chối (`422 invalid_attachment`), nên không upload nguyên file camera.
+3. Gửi `attachments` (`path`, `profile_id`) trong `POST /v1/chat`; xử lý `documents` trong response / `done`.
+4. Màn hồ sơ: danh sách, chi tiết (dữ liệu trích xuất, đánh dấu `uncertain_fields`), xoá, hiển thị trạng thái (kể cả `failed` / `unreadable` với nút gửi lại).
+5. Nội dung popup chia sẻ hồ sơ nói rõ có lưu ảnh và dữ liệu giấy tờ y tế.
+
 ## Lịch sử chat
 
 Đọc lại và xoá những gì service đã lưu theo `conversation_id`. Chỉ cần `Authorization` như trên; **không** kiểm đồng ý hay rollout (đây là dữ liệu của chính user) và không trừ lượt. Mỗi user chỉ thấy và xoá được hội thoại của mình.

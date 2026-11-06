@@ -83,12 +83,31 @@ Token tính theo kích thước điểm ảnh, không theo dung lượng file: g
 
 1. Xoay theo EXIF, chuyển RGB, bỏ EXIF.
 2. Cắt viền thừa: bỏ vùng nền gần đồng màu quanh tờ giấy (so với màu góc ảnh, có ngưỡng); không cắt quá `OCR_MAX_CROP_RATIO` mỗi cạnh để không mất chữ sát mép.
-3. Thu nhỏ giữ tỉ lệ, không phóng to: 512 px (phân loại), `OCR_MAX_SIDE` (OCR, mặc định 1600).
+3. Thu nhỏ giữ tỉ lệ, không phóng to: 512 px (phân loại), `OCR_MAX_SIDE` (OCR, mặc định 1280).
 4. JPEG chất lượng 85, gửi dạng `data:` URL.
 
 Ảnh đã chuẩn hoá không lưu (dựng lại được từ ảnh gốc).
 
 `OCR_MAX_SIDE` chốt bằng đo (mục 10): chạy bộ ảnh mẫu ở 1024 / 1280 / 1600 / 2048, so `usage.prompt_tokens` thật và độ chính xác, chọn mốc thấp nhất không làm giảm độ chính xác.
+
+**Kết quả đo 2026-11-06** (8 ảnh giả lập từ `scripts/ocr_samples.py`, 12 trường đáp án; chạy `scripts/ocr_benchmark.py`; cả hai model dùng được với khoá API hiện tại):
+
+```
+model | max_side | prompt_tokens TB | đúng/tổng
+gpt-5-nano | 1024 | 1839 | 11/12
+gpt-5-nano | 1280 | 2477 | 12/12
+gpt-5-nano | 1600 | 3455 | 11/12
+gpt-5-nano | 2048 | 4048 | 12/12
+gpt-6-luna | 1024 | 1617 | 12/12
+gpt-6-luna | 1280 | 2128 | 12/12
+gpt-6-luna | 1600 | 2910 | 12/12
+gpt-6-luna | 2048 | 3384 | 12/12
+```
+
+- `OCR_MAX_SIDE` = **1280**: mốc nhỏ nhất đạt 12/12 như 2048 ở `gpt-5-nano` (1024 thiếu 1 trường; 1600 thiếu 1 trường do model dao động giữa các lần gọi) và cũng 12/12 ở `gpt-6-luna`. Token giảm khoảng 39% so với 2048 (2477 so với 4048 ở nano).
+- `OCR_EXTRACT_MODEL`: giữ mặc định (bằng `OPENAI_MODEL`). `gpt-6-luna` hơn `gpt-5-nano` tối đa 1 trường trên bộ mẫu, chưa tới ngưỡng 2 trường.
+- Bộ mẫu nhỏ và model có dao động giữa các lần chạy: nên đo lại trên ảnh thật đã che thông tin khi có.
+- Test live `test_classification`: ảnh `prescription_blurry.jpg` (nhoè nặng, kỳ vọng `prescription` + `readable=false`) vẫn dao động giữa `prescription`, `medical_record`, `not_medical` ở độ phân giải 512 px dù đã sửa prompt hai lần; các ảnh còn lại ổn định. `test_extraction_reads_expected_fields` xanh.
 
 ## 5. Dữ liệu trích xuất
 
@@ -168,7 +187,7 @@ Không log chữ OCR, dữ liệu trích xuất hay `storage_path`; log chỉ c�
 | `OCR_CLASSIFY_MODEL` | `gpt-5-nano` |
 | `OCR_EXTRACT_MODEL` | bằng `OPENAI_MODEL`; đổi nếu bước đo cho thấy model khác đọc đúng hơn rõ rệt |
 | `OCR_CLASSIFY_PROMPT_VERSION`, `OCR_EXTRACT_PROMPT_VERSION` | `v1` |
-| `OCR_CLASSIFY_SIDE` / `OCR_MAX_SIDE` | 512 / 1600 |
+| `OCR_CLASSIFY_SIDE` / `OCR_MAX_SIDE` | 512 / 1280 |
 | `OCR_MIN_CONFIDENCE` | 0.6 |
 | `OCR_MAX_PER_DAY` | 3 |
 | `OCR_MAX_ATTACHMENTS` | 3 |

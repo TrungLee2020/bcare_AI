@@ -266,7 +266,7 @@ class Settings(BaseSettings):
     ocr_extract_prompt_version: str = "v1"
     # Cạnh dài (px) của ảnh gửi model: phân loại / OCR. Token tính theo điểm ảnh.
     ocr_classify_side: int = 512
-    ocr_max_side: int = 1600
+    ocr_max_side: int = 1280
     # Mỗi cạnh cắt viền tối đa ngần này phần kích thước.
     ocr_max_crop_ratio: float = 0.2
     # Phân loại chắc chắn dưới mức này thì không OCR.
