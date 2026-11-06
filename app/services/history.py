@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from app.config import settings
-from app.db import repository
+from app.db import documents_repository, repository
 from app.db.repository import ConversationContext
 from app.db.session import db_session
 from app.schemas import ChatRequestMessage, ChatResponseMessage
@@ -85,10 +85,12 @@ _purge_task: asyncio.Task | None = None
 
 
 async def purge_deleted() -> int:
-    """Xoá hẳn hội thoại đã bị ẩn quá HISTORY_PURGE_AFTER_DAYS ngày."""
+    """Xoá hẳn hội thoại và tài liệu đã bị ẩn quá HISTORY_PURGE_AFTER_DAYS ngày."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=settings.history_purge_after_days)
     async with db_session() as db:
-        return await repository.purge_deleted(db, cutoff)
+        conversations = await repository.purge_deleted(db, cutoff)
+        documents = await documents_repository.purge_deleted_documents(db, cutoff)
+    return conversations + documents
 
 
 async def _purge_forever() -> None:
@@ -97,7 +99,7 @@ async def _purge_forever() -> None:
         try:
             purged = await purge_deleted()
             if purged:
-                logger.info("Đã xoá hẳn %d hội thoại user đã xoá", purged)
+                logger.info("Đã xoá hẳn %d bản ghi user đã xoá", purged)
         except Exception:
             logger.exception("Xoá hẳn hội thoại đã xoá thất bại, thử lại lần sau")
         await asyncio.sleep(settings.history_purge_interval_seconds)

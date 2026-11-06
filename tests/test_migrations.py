@@ -87,4 +87,4 @@ async def test_upgrade_lan_hai_khong_lam_gi(conn):
     await conn.run_sync(_upgrade)
     await conn.run_sync(_upgrade)
     version = await conn.scalar(sa.text("SELECT version_num FROM alembic_version"))
-    assert version == "0003"
+    assert version == "0004"
