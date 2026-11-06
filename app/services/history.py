@@ -61,6 +61,7 @@ async def record_turn(
             request_id=message.request_id,
             question=message.content,
             answer=response.answer.answer,
+            user_meta={"documents": [str(d) for d in message.document_ids]} if message.document_ids else None,
             meta={
                 "status": response.status,
                 "model": response.model,

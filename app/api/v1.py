@@ -597,6 +597,8 @@ def _message_body(message) -> dict:
         body["should_see_doctor"] = bool(message.meta.get("should_see_doctor", False))
         # Lượt ghi trước khi lưu gợi ý vào meta thì không có.
         body["follow_up_questions"] = message.meta.get("follow_up_questions", [])
+    if message.role == "user" and message.meta.get("documents"):
+        body["documents"] = message.meta["documents"]
     return body
 
 

@@ -34,6 +34,11 @@ class ChatRequestMessage(BaseModel):
     # lịch sử chat.
     health_context: str | None = None
 
+    # Ảnh giấy tờ đính kèm (health_documents.id), xem
+    # docs/superpowers/specs/2026-11-06-chat-image-ocr-design.md. Consumer xử
+    # lý chúng trước khi trả lời; `content` rỗng = tin chỉ có ảnh.
+    document_ids: list[UUID] = Field(default_factory=list)
+
 
 class V1Message(BaseModel):
     role: Literal["user", "assistant", "system"]

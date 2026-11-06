@@ -74,6 +74,7 @@ async def save_turn(
     question: str,
     answer: str,
     meta: dict,
+    user_meta: dict | None = None,
 ) -> None:
     """
     Ghi 1 lượt hỏi-đáp (2 dòng: user + assistant).
@@ -88,7 +89,7 @@ async def save_turn(
             request_id=request_id,
             role="user",
             content=question,
-            meta={},
+            meta=user_meta or {},
         ),
         dict(
             session_id=session_id,

@@ -11,6 +11,9 @@ from app.kafka.producer import publish_chat_response, publish_dead_letter
 from app.redis_client import get_redis
 from app.schemas import ChatRequestMessage, ChatResponseMessage, DeadLetterMessage
 from app.services import answering, history, idempotency, quota
+from app.services.documents import context as documents_context
+from app.services.documents import pipeline as documents_pipeline
+from app.services.documents import replies as documents_replies
 from app.sse import replay
 
 logger = logging.getLogger(__name__)
@@ -70,15 +73,46 @@ async def _deliver(response: ChatResponseMessage) -> None:
     await publish_chat_response(response)
 
 
+async def _record_documents_only(message: ChatRequestMessage) -> None:
+    """Tin chỉ có ảnh: API đã trả câu "đã nhận" cho app, không ai chờ response.
+    Chỉ ghi lượt vào lịch sử (để app mở lại hội thoại thấy ảnh) và cache cho
+    lần Kafka giao lại."""
+    response = _notice(message, "ok", documents_replies.received_answer(len(message.document_ids)))
+    await idempotency.save_response(get_redis(), message.request_id, response.model_dump(mode="json"))
+    try:
+        await history.record_turn(message, response)
+    except Exception:
+        logger.exception("Ghi lịch sử thất bại request_id=%s", message.request_id)
+
+
+async def _document_context(message: ChatRequestMessage) -> str | None:
+    try:
+        return await documents_context.for_conversation(message.session_id, message.user_id)
+    except Exception:
+        # Thiếu ngữ cảnh ảnh thì vẫn trả lời được; không biến lỗi DB thành lỗi OpenAI.
+        logger.exception("Nạp ngữ cảnh tài liệu thất bại request_id=%s", message.request_id)
+        return None
+
+
 async def _handle(message: ChatRequestMessage) -> None:
     """Xử lý 1 câu hỏi: sinh câu trả lời, cache lại cho retry, publish sang
     chat_responses."""
     redis = get_redis()
+    if message.document_ids and not message.content.strip():
+        for document_id in message.document_ids:
+            await documents_pipeline.process(redis, document_id)
+        await _record_documents_only(message)
+        return
     slow_notice = asyncio.create_task(_notify_slow(message))
     try:
+        for document_id in message.document_ids:
+            await documents_pipeline.process(redis, document_id)
         context = await history.load_context(message)
         response = await answering.answer_question(
-            message, context, settings.model_for_question(message.question_no)
+            message,
+            context,
+            settings.model_for_question(message.question_no),
+            document_context=await _document_context(message),
         )
     except Exception as exc:
         # Tới đây là đã retry hết số lần cho phép (xem app/services/retry.py).
