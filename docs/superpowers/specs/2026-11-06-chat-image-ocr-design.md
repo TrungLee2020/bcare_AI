@@ -1,6 +1,8 @@
 # Đọc ảnh giấy tờ y tế gửi qua chat (OCR) — thiết kế
 
-Ngày: 2026-11-06. Trạng thái: chờ duyệt, chưa có code.
+Ngày: 2026-11-06. Trạng thái: đã duyệt; kế hoạch triển khai ở `docs/superpowers/plans/2026-11-06-chat-image-ocr.md`.
+
+Chỉnh khi lập kế hoạch (đọc code): không thêm topic Kafka; tin có ảnh đi qua `chat_requests` như tin chữ (consumer có sẵn retry, DLQ, idempotency, ghi lịch sử). Tài liệu gắn hội thoại bằng cột `conversation_id`.
 
 ## 1. Mục tiêu
 
@@ -42,12 +44,13 @@ Lưu theo từng user: ảnh gốc, chữ OCR, dữ liệu trích xuất.
 2. Mỗi `path` phải bắt đầu bằng `{user_id}/`, không thì `403 forbidden`. RLS là lớp thứ hai.
 3. Tải ảnh: `GET {SUPABASE_URL}/storage/v1/object/authenticated/health-documents/{path}` với `apikey: <anon>` + `Authorization: Bearer <token user>`. Không dùng service role key.
 4. Kiểm: giải mã được bằng Pillow, định dạng JPEG / PNG / WebP (app chuyển HEIC sang JPEG trước khi upload), ≤ `OCR_MAX_IMAGE_BYTES`. Sai → `422 invalid_attachment`.
-5. Tính `sha256`. Cùng user đã có tài liệu cùng hash (chưa xoá) → dùng lại tài liệu đó, xoá object vừa upload trùng (đang có token user), không xử lý lại.
+5. Tính `sha256`. Cùng user đã có tài liệu cùng hash (chưa xoá) → dùng lại bản ghi đó, gắn sang hội thoại hiện tại, xoá object vừa upload trùng (đang có token user). Bản ghi đang `done` / `skipped` / `received` / `processing` thì không xử lý lại; `unreadable` / `quota_exceeded` / `failed` thì đặt lại `received` và xử lý lại (user chụp lại, hoặc gửi lại hôm sau).
 6. Tạo `health_documents` trạng thái `received`. Đặt bytes ảnh vào Redis `ocr_image:{document_id}`, TTL `OCR_IMAGE_TTL_SECONDS` (3600). Worker không cần token user (token Supabase hết hạn sau ~1 giờ).
-7. Ghi id tài liệu vào `meta.documents` của tin user trong `chat_messages`.
-8. Rẽ nhánh:
-   - **Không có câu hỏi:** publish `document_jobs` (key = user_id), trả ngay câu cố định "Bụt đã nhận N ảnh, đang đọc và lưu vào hồ sơ của bạn." Không gọi model, không trừ lượt chat.
-   - **Có câu hỏi:** đi luồng chat hiện có (trừ lượt chat như thường); message Kafka mang thêm danh sách id tài liệu. Consumer xử lý tài liệu (mục 3.3) rồi mới trả lời.
+7. Publish `chat_requests` (key = user_id) như tin chữ, message mang thêm `document_ids`. Consumer xử lý từng tài liệu (mục 3.3), ghi lượt vào lịch sử với `meta.documents` ở tin user, rồi:
+   - **Không có câu hỏi:** API đã trả ngay câu cố định "Bụt đã nhận N ảnh, đang đọc và lưu vào hồ sơ của bạn." (không chờ consumer, không gọi model chat, không trừ lượt chat). Consumer ghi đúng câu đó làm lượt trả lời trong lịch sử.
+   - **Có câu hỏi:** trừ lượt chat như thường; consumer xử lý tài liệu xong mới trả lời, câu trả lời về qua SSE / JSON như tin chữ.
+
+   Xử lý ảnh nằm trong worker của partition, nên một tin 3 ảnh giữ partition đó lâu hơn một câu chat (vài chục giây). Chấp nhận ở lượng hiện tại (3 ảnh/ngày/user); lượng lớn thì tách topic riêng.
 
 ### 3.3 Xử lý một tài liệu (`documents.process(document_id)`)
 
@@ -68,9 +71,9 @@ Dùng chung cho worker `document_jobs` và consumer chat. Idempotent: tài liệ
 
 ### 3.4 Chat về sau
 
-Câu hỏi trong một hội thoại tự có dữ liệu trích xuất của tối đa `OCR_CONTEXT_DOCUMENTS` (3) tài liệu `done` gần nhất được đính trong hội thoại đó (lấy từ `chat_messages.meta.documents`). Đưa vào prompt qua `fence("document_data", …)`, giới hạn `OCR_CONTEXT_MAX_CHARS`. Chỉ đưa bản trích xuất, không đưa chữ OCR thô (ngắn hơn, ít chỗ cho câu injection).
+Câu hỏi trong một hội thoại tự có dữ liệu của tối đa `OCR_CONTEXT_DOCUMENTS` (3) tài liệu gần nhất gắn với hội thoại đó (`health_documents.conversation_id`): bản trích xuất nếu `done`, trạng thái nếu chưa đọc được. Đưa vào prompt qua `fence("document_data", …)`, giới hạn `OCR_CONTEXT_MAX_CHARS`. Chỉ đưa bản trích xuất, không đưa chữ OCR thô (ngắn hơn, ít chỗ cho câu injection).
 
-Tài liệu `unreadable` / `quota_exceeded` / `failed` trong hội thoại: Bụt nói rõ chưa đọc được và vì sao (chụp lại / mai đọc tiếp / gửi lại).
+Tài liệu `unreadable` / `quota_exceeded` / `failed` trong hội thoại: Bụt nói rõ chưa đọc được và vì sao (chụp lại / gửi lại hôm sau / gửi lại).
 
 **Liều thuốc trong chat:** `output_validator` vẫn chặn số mg / số viên trong câu trả lời, kể cả khi chép từ đơn của chính user. Bụt nói "theo đơn bác sĩ ghi, bạn xem chi tiết trong hồ sơ"; liều đầy đủ app hiển thị ở màn tài liệu (dữ liệu trích xuất, không qua LLM). Đổi luật này là quyết định của Product (mục 11).
 
@@ -138,6 +141,7 @@ Tối đa `OCR_MAX_ATTACHMENTS` (3) ảnh mỗi tin. Response thêm `documents: 
 |---|---|---|
 | `id` | uuid PK | |
 | `user_id` | varchar(64) | |
+| `conversation_id` | uuid null | hội thoại gần nhất user gửi ảnh này |
 | `profile_id` | varchar(64) null | do app gửi |
 | `storage_path` | text | |
 | `sha256` | char(64) | unique (`user_id`, `sha256`) where `deleted_at is null` |
@@ -148,7 +152,7 @@ Tối đa `OCR_MAX_ATTACHMENTS` (3) ảnh mỗi tin. Response thêm `documents: 
 | `meta` | JSONB | model, prompt version, token, chi phí, lý do `failed` |
 | `created_at`, `processed_at`, `deleted_at` | timestamptz | |
 
-Index (`user_id`, `created_at desc`).
+Index (`user_id`, `created_at desc`), (`conversation_id`).
 
 `health_document_ocr`: `document_id` PK/FK (cascade), `text`, `model`, `created_at`.
 
@@ -182,7 +186,7 @@ Không log chữ OCR, dữ liệu trích xuất hay `storage_path`; log chỉ c�
 - `app/services/documents/pipeline.py`: `process(document_id)`, trạng thái, hạn mức.
 - `app/db/models.py`, `app/db/documents_repository.py`: bảng và truy vấn.
 - `app/api/v1.py`: `attachments` trong `/v1/chat`, endpoint `/v1/documents`.
-- `app/kafka/`: topic `document_jobs`, vòng consume trong consumer hiện có.
+- `app/kafka/consumer.py`: tin có `document_ids` → xử lý tài liệu trước khi trả lời.
 - `app/prompts.py`: thêm `document_data` vào `RESERVED_TAGS`.
 
 ## 10. Kiểm thử
