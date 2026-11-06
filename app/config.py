@@ -256,6 +256,34 @@ class Settings(BaseSettings):
     # cần token (chỉ dành cho dev); production bắt buộc đặt.
     metrics_token: str = ""
 
+    # Đọc ảnh giấy tờ y tế gửi qua chat (OCR).
+    # docs/superpowers/specs/2026-11-06-chat-image-ocr-design.md
+    ocr_enabled: bool = False
+    ocr_classify_model: str = "gpt-5-nano"
+    # Trống = dùng OPENAI_MODEL.
+    ocr_extract_model: str = ""
+    ocr_classify_prompt_version: str = "v1"
+    ocr_extract_prompt_version: str = "v1"
+    # Cạnh dài (px) của ảnh gửi model: phân loại / OCR. Token tính theo điểm ảnh.
+    ocr_classify_side: int = 512
+    ocr_max_side: int = 1600
+    # Mỗi cạnh cắt viền tối đa ngần này phần kích thước.
+    ocr_max_crop_ratio: float = 0.2
+    # Phân loại chắc chắn dưới mức này thì không OCR.
+    ocr_min_confidence: float = 0.6
+    # Ảnh được OCR mỗi ngày mỗi user (mọi gói).
+    ocr_max_per_day: int = 3
+    ocr_max_attachments: int = 3
+    ocr_max_image_bytes: int = 10 * 1024 * 1024
+    # Ảnh đặt tạm trong Redis chờ consumer xử lý.
+    ocr_image_ttl_seconds: int = 3600
+    ocr_llm_budget_seconds: float = 60.0
+    # Chữ OCR của một phiếu xét nghiệm dài vượt trần chat (openai_max_output_tokens).
+    ocr_max_output_tokens: int = 4000
+    ocr_context_documents: int = 3
+    ocr_context_max_chars: int = 4000
+    storage_bucket: str = "health-documents"
+
     def model_for_question(self, question_no: int | None) -> str:
         """Model cho câu hỏi thứ `question_no` trong ngày của user. None =
         message cũ trước khi có trường này -> model mặc định."""
