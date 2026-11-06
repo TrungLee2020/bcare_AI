@@ -128,3 +128,118 @@ async def test_context_renders_done_and_pending_documents(db_maker):
     assert "chụp lại" in text
     assert await documents_context.for_conversation(conversation, "someone-else") is None
     assert await documents_context.for_conversation(None, "u1") is None
+
+
+# --- Fix round 1: tin chỉ có ảnh không đụng tới quota chat, đọc ảnh có trần thời gian ---
+
+import asyncio
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+
+from app.config import settings
+from app.services import quota
+from app.services.documents import pipeline
+
+
+async def new_doc(conversation=None):
+    document_id = uuid4()
+    async with db_session() as db:
+        await repo.create_document(
+            db, document_id=document_id, user_id="u1", conversation_id=conversation,
+            profile_id=None, storage_path=f"u1/{document_id}.jpg", sha256=document_id.hex * 2,
+        )
+    return document_id
+
+
+async def status_of(document_id):
+    async with db_session() as db:
+        return await repo.get_document(db, document_id)
+
+
+def chat_key():
+    return quota.quota_key("u1")
+
+
+async def test_documents_only_does_not_call_chat_model_or_touch_chat_quota(db_maker, delivered, processed, redis):
+    fake = FakeOpenAI()
+    openai_client.set_openai(fake)
+    await redis.set(chat_key(), 1)
+    try:
+        await consumer._handle(message(document_ids=[uuid4()]))
+    finally:
+        openai_client.set_openai(None)
+    assert fake.calls == []
+    assert int(await redis.get(chat_key())) == 1
+
+
+async def test_question_is_answered_even_if_document_processing_raises(db_maker, delivered, monkeypatch):
+    fake = FakeOpenAI()
+    openai_client.set_openai(fake)
+
+    async def boom(redis, document_id):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(consumer.documents_pipeline, "process", boom)
+    try:
+        await consumer._handle(message("đơn này là gì", [uuid4()]))
+    finally:
+        openai_client.set_openai(None)
+    assert [r.status for r in delivered] == ["ok"]
+
+
+async def test_give_up_on_documents_only_does_not_refund_or_deliver(db_maker, delivered, redis):
+    document_id = await new_doc()
+    msg = message(document_ids=[document_id])
+    await redis.set(chat_key(), 1)
+    record = SimpleNamespace(value=msg.model_dump_json().encode())
+    await consumer._give_up(record)
+    assert int(await redis.get(chat_key())) == 1
+    assert delivered == []
+    doc = await status_of(document_id)
+    assert doc.status == "failed" and doc.meta["reason"] == "processing_failed"
+
+
+async def test_expired_documents_only_message_is_still_processed(db_maker, delivered, processed, redis):
+    document_id = uuid4()
+    msg = message(document_ids=[document_id])
+    msg.created_at = datetime.now(timezone.utc) - timedelta(seconds=settings.request_max_age_seconds + 60)
+    await redis.set(chat_key(), 1)
+    record = SimpleNamespace(
+        value=msg.model_dump_json().encode(), topic="chat_requests", partition=0, offset=0, key=b"1"
+    )
+    await consumer._process_record(record)
+    assert processed == [document_id]
+    assert delivered == []
+    assert int(await redis.get(chat_key())) == 1
+    async with db_session() as db:
+        rows = await repository.list_messages(db, msg.session_id, "u1", 10, None)
+    assert [r.role for r in rows] == ["user", "assistant"]
+
+
+async def test_process_all_budget_fails_unfinished_and_refunds_ocr_quota(db_maker, redis, monkeypatch):
+    from app.redis_client import set_redis
+    from tests.test_documents_pipeline import jpeg_bytes
+    from tests.fake_vision import make_classification
+
+    set_redis(redis)
+    document_id = await new_doc()
+    await pipeline.stash_image(redis, document_id, jpeg_bytes())
+
+    async def classify(url):
+        return make_classification(), None
+
+    async def slow_extract(url, doc_type):
+        await asyncio.sleep(5)
+
+    monkeypatch.setattr(openai_client, "classify_document", classify)
+    monkeypatch.setattr(openai_client, "extract_document", slow_extract)
+    monkeypatch.setattr(pipeline.cost, "record", lambda *a, **k: {})
+    monkeypatch.setattr(settings, "ocr_message_budget_seconds", 0.3)
+    try:
+        await pipeline.process_all(redis, [document_id])
+    finally:
+        set_redis(None)
+    doc = await status_of(document_id)
+    assert doc.status == "failed" and doc.meta["reason"] == "message_budget"
+    used = await redis.get(quota.daily_key(pipeline.OCR_QUOTA_PREFIX, "u1"))
+    assert int(used or 0) == 0

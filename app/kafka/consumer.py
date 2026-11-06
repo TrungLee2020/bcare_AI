@@ -73,6 +73,10 @@ async def _deliver(response: ChatResponseMessage) -> None:
     await publish_chat_response(response)
 
 
+def _documents_only(message: ChatRequestMessage) -> bool:
+    return bool(message.document_ids) and not message.content.strip()
+
+
 async def _record_documents_only(message: ChatRequestMessage) -> None:
     """Tin chỉ có ảnh: API đã trả câu "đã nhận" cho app, không ai chờ response.
     Chỉ ghi lượt vào lịch sử (để app mở lại hội thoại thấy ảnh) và cache cho
@@ -99,14 +103,12 @@ async def _handle(message: ChatRequestMessage) -> None:
     chat_responses."""
     redis = get_redis()
     if message.document_ids and not message.content.strip():
-        for document_id in message.document_ids:
-            await documents_pipeline.process(redis, document_id)
+        await documents_pipeline.process_all(redis, message.document_ids)
         await _record_documents_only(message)
         return
     slow_notice = asyncio.create_task(_notify_slow(message))
     try:
-        for document_id in message.document_ids:
-            await documents_pipeline.process(redis, document_id)
+        await documents_pipeline.process_all(redis, message.document_ids)
         context = await history.load_context(message)
         response = await answering.answer_question(
             message,
@@ -213,7 +215,9 @@ async def _process_record(record) -> None:
         return
 
     age = (datetime.now(timezone.utc) - message.created_at).total_seconds()
-    if age > settings.request_max_age_seconds:
+    # Tin chỉ có ảnh không bị coi là hết hạn: nó không có lượt chat để hoàn, và
+    # ảnh cũ tự kết thúc là failed/image_expired trong pipeline.
+    if age > settings.request_max_age_seconds and not _documents_only(message):
         await _expire(message, age)
         return
 
@@ -242,6 +246,7 @@ async def _expire(message: ChatRequestMessage, age: float) -> None:
         settings.request_max_age_seconds,
     )
     metrics.incr("requests_expired")
+    await documents_pipeline.fail_unfinished(message.document_ids, "expired")
     await quota.refund(get_redis(), message.user_id, charged_at=message.created_at)
     response = _notice(message, "error", answering.ERROR_ANSWER, "expired")
     await idempotency.save_response(get_redis(), message.request_id, response.model_dump(mode="json"))
@@ -253,6 +258,11 @@ async def _give_up(record) -> None:
     chờ mãi. Chỉ là "cố": hạ tầng có thể vẫn đang hỏng."""
     try:
         message = ChatRequestMessage.model_validate_json(record.value)
+        if _documents_only(message):
+            # Không có lượt chat nào bị trừ và không ai chờ response.
+            await documents_pipeline.fail_unfinished(message.document_ids, "processing_failed")
+            return
+        await documents_pipeline.fail_unfinished(message.document_ids, "processing_failed")
         await quota.refund(get_redis(), message.user_id, charged_at=message.created_at)
         await _deliver(_notice(message, "error", answering.ERROR_ANSWER, "processing_failed"))
     except Exception:

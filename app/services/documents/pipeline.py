@@ -20,6 +20,7 @@ from app import metrics
 from app.config import settings
 from app.db import documents_repository as repo
 from app.db.session import db_session
+from app.redis_client import get_redis
 from app.services import cost, openai_client, quota
 from app.services.documents import image
 from app.services.documents.schemas import SCHEMA_VERSION
@@ -129,6 +130,10 @@ async def process(redis: Redis, document_id: UUID) -> str:
         extraction, usage = await asyncio.wait_for(
             openai_client.extract_document(large.data_url, found.doc_type), settings.ocr_llm_budget_seconds
         )
+    except asyncio.CancelledError:
+        # Bị huỷ (hết ngân sách của tin / tắt máy) sau khi đã trừ lượt: hoàn lại.
+        await quota.refund_daily(redis, OCR_QUOTA_PREFIX, user_id)
+        raise
     except Exception as exc:
         await quota.refund_daily(redis, OCR_QUOTA_PREFIX, user_id)
         logger.warning("Đọc tài liệu %s lỗi: %s", document_id, type(exc).__name__)
@@ -159,7 +164,50 @@ async def process(redis: Redis, document_id: UUID) -> str:
         # Lưu lỗi thì chưa có kết quả: hoàn lượt để lần giao lại không bị trừ hai lần.
         await quota.refund_daily(redis, OCR_QUOTA_PREFIX, user_id)
         raise
+    except asyncio.CancelledError:
+        await quota.refund_daily(redis, OCR_QUOTA_PREFIX, user_id)
+        raise
     await redis.delete(image_key(document_id))
     metrics.incr("ocr_done")
     logger.info("Tài liệu %s → done (%s)", document_id, found.doc_type)
     return "done"
+
+
+async def fail_unfinished(document_ids: list[UUID], reason: str) -> None:
+    """Đánh failed các ảnh chưa ở trạng thái cuối và xoá ảnh tạm. Best effort:
+    chạy ở đường xử lý lỗi nên không được ném."""
+    for document_id in document_ids:
+        try:
+            async with db_session() as db:
+                doc = await repo.get_document(db, document_id)
+                if doc is None or doc.status in repo.FINAL_STATUSES:
+                    continue
+                await repo.set_status(db, document_id, "failed", meta={"reason": reason})
+            await get_redis().delete(image_key(document_id))
+            metrics.incr("ocr_failed")
+        except Exception as exc:
+            logger.warning("Không đánh failed được tài liệu %s: %s", document_id, type(exc).__name__)
+
+
+async def process_all(redis: Redis, document_ids: list[UUID]) -> None:
+    """Đọc mọi ảnh của một tin song song, trong tổng ngân sách thời gian. Không
+    bao giờ ném: ảnh lỗi thì hiện ra là chưa đọc được trong ngữ cảnh, câu hỏi
+    vẫn được trả lời."""
+    if not document_ids:
+        return
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(*(process(redis, d) for d in document_ids), return_exceptions=True),
+            settings.ocr_message_budget_seconds,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Đọc ảnh quá ngân sách %.0fs", settings.ocr_message_budget_seconds)
+        metrics.incr("ocr_message_budget_exceeded")
+        await fail_unfinished(document_ids, "message_budget")
+        return
+    for document_id, result in zip(document_ids, results):
+        if isinstance(result, BaseException):
+            logger.warning("Đọc tài liệu %s lỗi: %s", document_id, type(result).__name__)
+    # Lỗi hạ tầng (vd DB) làm ảnh kẹt ở processing/received: đánh failed để không treo mãi.
+    if any(isinstance(r, BaseException) for r in results):
+        await fail_unfinished(document_ids, "process_error")

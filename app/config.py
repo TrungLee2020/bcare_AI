@@ -278,6 +278,8 @@ class Settings(BaseSettings):
     # Ảnh đặt tạm trong Redis chờ consumer xử lý.
     ocr_image_ttl_seconds: int = 3600
     ocr_llm_budget_seconds: float = 60.0
+    # Tổng thời gian đọc ảnh của MỘT tin (các ảnh đọc song song); quá thì ảnh chưa xong bị đánh failed.
+    ocr_message_budget_seconds: float = 45.0
     # Chữ OCR của một phiếu xét nghiệm dài vượt trần chat (openai_max_output_tokens).
     ocr_max_output_tokens: int = 4000
     ocr_context_documents: int = 3
