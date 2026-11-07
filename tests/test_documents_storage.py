@@ -99,3 +99,29 @@ async def test_delete_server_error():
     use(lambda request: httpx.Response(500))
     with pytest.raises(storage.StorageError):
         await storage.delete(f"{USER}/a.jpg", "tok")
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"statusCode": "404", "error": "not_found", "message": "Object not found"},
+        {"statusCode": "404", "error": "Not found", "message": "Object not found"},
+        {"error": "not_found"},
+    ],
+)
+async def test_delete_400_not_found_counts_as_deleted(body):
+    use(lambda request: httpx.Response(400, json=body))
+    await storage.delete(f"{USER}/a.jpg", "tok")
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(400, json={"statusCode": "403", "error": "Unauthorized", "message": "new row violates row-level security policy"}),
+        httpx.Response(400, text="not json"),
+    ],
+)
+async def test_delete_400_denied_is_an_error(response):
+    use(lambda request: response)
+    with pytest.raises(storage.StorageError):
+        await storage.delete(f"{USER}/a.jpg", "tok")

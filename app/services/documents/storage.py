@@ -86,12 +86,29 @@ async def download(path: str, access_token: str) -> bytes:
     return b"".join(chunks)
 
 
+def _is_not_found(resp: httpx.Response) -> bool:
+    """Supabase trả 400 cho cả "không có object" lẫn bị RLS chặn; chỉ body mới
+    phân biệt được (`statusCode` "404" / `error` "not_found")."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return False
+    if not isinstance(body, dict):
+        return False
+    error = str(body.get("error", "")).strip().lower()
+    return str(body.get("statusCode", "")) == "404" or error in ("not_found", "not found")
+
+
 async def delete(path: str, access_token: str) -> None:
-    """Không có object (đã xoá rồi) coi như xong."""
+    """Không có object (đã xoá rồi) coi như xong. 400 vì bị chặn (RLS, token
+    sai) là lỗi: coi là xong thì API báo đã xoá trong khi ảnh vẫn còn."""
     url = f"{_base()}/{settings.storage_bucket}/{path}"
     try:
         resp = await _http().delete(url, headers=_headers(access_token))
     except httpx.HTTPError as exc:
         raise StorageError(str(exc)) from exc
-    if resp.status_code not in (200, 204, 400, 404):
-        raise StorageError(f"HTTP {resp.status_code}")
+    if resp.status_code in (200, 204, 404):
+        return
+    if resp.status_code == 400 and _is_not_found(resp):
+        return
+    raise StorageError(f"HTTP {resp.status_code}")
