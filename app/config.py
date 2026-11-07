@@ -215,7 +215,7 @@ class Settings(BaseSettings):
     report_summary_max_chars: int = 1200
 
     # /v1/facility/suggest (KAN-115)
-    facility_prompt_version: str = "v2"
+    facility_prompt_version: str = "v3"
     facility_table: str = "facilities"
     # Bật khi cột facilities.audience đã có trên DB (child / adult / all).
     facility_audience_column: bool = False

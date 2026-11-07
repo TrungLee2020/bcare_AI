@@ -29,6 +29,8 @@ CHILD_MAX_AGE = 16
 TRAUMA_SENSITIVE = frozenset({"joint_pain", "back_pain", "headache", "numbness"})
 TRAUMA_SPECIALTY = "ngoai_chan_thuong"
 MENTAL_SPECIALTY = "tam_than"
+# Không bao giờ được giả định: tâm thần đi qua cờ mental_health, tuổi do app xử lý.
+GUESS_EXCLUDED = frozenset({"tam_than", "nhi"})
 
 
 def _load(name: str) -> dict:
@@ -39,6 +41,17 @@ def _load(name: str) -> dict:
 def specialties() -> dict[str, str]:
     """key → nhãn hiển thị."""
     return {s["key"]: s["label"] for s in _load("specialties.json")["specialties"]}
+
+
+def guessable_specialties() -> list[str]:
+    """Chuyên khoa được phép giả định, giữ thứ tự trong specialties.json."""
+    return [k for k in specialties() if k not in GUESS_EXCLUDED]
+
+
+@lru_cache
+def specialty_details() -> dict[str, dict]:
+    """key → bản ghi đầy đủ trong specialties.json (typical_symptoms…)."""
+    return {s["key"]: s for s in _load("specialties.json")["specialties"]}
 
 
 @lru_cache
@@ -194,7 +207,9 @@ def age_group(age: int | None) -> str:
 class SpecialtyPick:
     key: str
     role: str  # primary | secondary
-    sources: list[str] = field(default_factory=list)  # symptom key, hoặc "mental" / "choice"
+    sources: list[str] = field(default_factory=list)  # symptom key, hoặc "mental" / "choice" / "assumed"
+    assumed: bool = False  # chuyên khoa do model giả định, không có trong bảng đã duyệt
+    reason: str = ""  # lý do giả định (chỉ khi assumed)
 
 
 @dataclass
@@ -210,6 +225,7 @@ def map_symptoms(
     *,
     after_trauma: bool = False,
     mental_health: bool = False,
+    guesses: list[tuple[str, str, str]] | tuple = (),
 ) -> Mapping:
     picks: dict[str, SpecialtyPick] = {}
     general: list[str] = []
@@ -242,6 +258,11 @@ def map_symptoms(
 
     if mental_health:
         add(MENTAL_SPECIALTY, "primary", "mental")
+
+    for _text, key, reason in guesses:
+        if key in picks or key not in specialties() or key in GUESS_EXCLUDED:
+            continue  # bảng đã duyệt thắng giả định
+        picks[key] = SpecialtyPick(key, "secondary", ["assumed"], assumed=True, reason=reason)
 
     # Chuyên khoa vừa chính (từ triệu chứng này) vừa phụ (từ triệu chứng kia)
     # giữ vai chính; add() đã nâng. Thứ tự: chính trước.

@@ -46,6 +46,11 @@ def _symptom_enum() -> type[enum.Enum]:
     return enum.Enum("SymptomKey", {k: k for k in keys}, type=str)
 
 
+def _guess_enum() -> type[enum.Enum]:
+    keys = ["", *catalog.guessable_specialties()]
+    return enum.Enum("GuessSpecialty", {(k or "none"): k for k in keys}, type=str)
+
+
 class _Base(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -57,11 +62,18 @@ def _build_schema() -> type[BaseModel]:
         key=(_symptom_enum(), ...),
         matched_text=(str, ...),
     )
+    unmapped = create_model(
+        "UnmappedPhrase",
+        __base__=_Base,
+        text=(str, ...),
+        specialty=(_guess_enum(), ...),
+        reason=(str, ...),
+    )
     return create_model(
         "SymptomInterpretation",
         __base__=_Base,
         symptoms=(list[found], ...),
-        unmapped=(list[str], ...),
+        unmapped=(list[unmapped], ...),
         after_trauma=(bool, ...),
         mental_health=(bool, ...),
         ambiguous_neuro=(bool, ...),
@@ -77,6 +89,7 @@ class Interpretation(BaseModel):
 
     symptoms: list[tuple[str, str]] = []  # (key, matched_text)
     unmapped: list[str] = []
+    guesses: list[tuple[str, str, str]] = []  # (text, key chuyên khoa, lý do)
     after_trauma: bool = False
     mental_health: bool = False
     ambiguous_neuro: bool = False
@@ -84,6 +97,7 @@ class Interpretation(BaseModel):
 
 
 MAX_UNMAPPED = 5
+MAX_REASON_CHARS = 80
 MAX_PHRASE_CHARS = 60
 
 
@@ -122,7 +136,9 @@ def verify(raw: BaseModel, text: str) -> Interpretation:
 
     matched_norm = [normalize(m) for _, m in symptoms]
     unmapped = []
-    for phrase in raw.unmapped:
+    guesses: list[tuple[str, str, str]] = []
+    for item in raw.unmapped:
+        phrase = item.text
         phrase_norm = normalize(phrase)
         if not _grounded(phrase, text_norm):
             continue
@@ -134,10 +150,17 @@ def verify(raw: BaseModel, text: str) -> Interpretation:
             continue
         if raw.ambiguous_neuro and "than kinh" in phrase_norm:
             continue
-        unmapped.append(phrase.strip()[:MAX_PHRASE_CHARS])
+        text_kept = phrase.strip()[:MAX_PHRASE_CHARS]
+        unmapped.append(text_kept)
+        specialty = item.specialty.value if isinstance(item.specialty, enum.Enum) else str(item.specialty)
+        # Chỉ cụm được giữ mới tạo giả định; tam_than / nhi không bao giờ được giả định.
+        if specialty and specialty in catalog.guessable_specialties():
+            guesses.append((text_kept, specialty, item.reason.strip()[:MAX_REASON_CHARS]))
+    kept = unmapped[:MAX_UNMAPPED]
     return Interpretation(
         symptoms=symptoms,
-        unmapped=unmapped[:MAX_UNMAPPED],
+        unmapped=kept,
+        guesses=[g for g in guesses if g[0] in kept],
         after_trauma=raw.after_trauma,
         mental_health=raw.mental_health,
         ambiguous_neuro=raw.ambiguous_neuro,
@@ -151,4 +174,16 @@ def tag_table() -> str:
     for key, tag in catalog.all_symptoms().items():
         synonyms = ", ".join(tag.get("synonyms", []))
         lines.append(f"- {key}: {tag['name']} ({synonyms})")
+    return "\n".join(lines)
+
+
+def specialty_table() -> str:
+    """Danh sách chuyên khoa được phép giả định, đưa vào system prompt."""
+    lines = []
+    for key in catalog.guessable_specialties():
+        detail = catalog.specialty_details()[key]
+        typical = detail.get("typical_symptoms", [])
+        if not isinstance(typical, str):
+            typical = ", ".join(typical)
+        lines.append(f"- {key}: {detail['label']} (triệu chứng điển hình: {typical})")
     return "\n".join(lines)

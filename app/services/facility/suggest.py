@@ -24,6 +24,7 @@ from app.services.facility.interpret import (
     Interpretation,
     SymptomInterpretation,
     emergency_from_keywords,
+    specialty_table,
     tag_table,
     verify,
 )
@@ -67,7 +68,13 @@ async def _free() -> None:
 
 
 def _system_prompt() -> str:
-    return load_prompt("facility", settings.facility_prompt_version) + "\n" + tag_table()
+    return (
+        load_prompt("facility", settings.facility_prompt_version)
+        + "\n"
+        + tag_table()
+        + "\n\nDanh sách chuyên khoa (key: tên (triệu chứng điển hình)):\n"
+        + specialty_table()
+    )
 
 
 def _cache_key(text: str) -> str:
@@ -203,6 +210,7 @@ async def suggest(
         group,
         after_trauma=found.after_trauma,
         mental_health=found.mental_health and not clarify_choice,
+        guesses=[] if general_only else found.guesses,
     )
     if clarify_choice and not general_only:
         mapping.specialties.setdefault(clarify_choice, catalog.SpecialtyPick(clarify_choice, "primary", []))
@@ -213,15 +221,22 @@ async def suggest(
 
     if found.unmapped:
         metrics.incr("facility_unmapped")
+        guess_by_text = {text: key for text, key, _ in found.guesses}
         for phrase in found.unmapped:
+            guess = guess_by_text.get(phrase, "none")
+            metrics.incr(f"facility_guess_{guess}")
             # Không kèm user id, không kèm toạ độ.
-            logger.info("facility_unmapped phrase=%r group=%s", phrase, group)
+            logger.info("facility_unmapped phrase=%r guess=%s group=%s", phrase, guess, group)
 
+    assumed_labels = [catalog.specialty_label(p.key) for p in mapping.specialties.values() if p.assumed]
     if note is None:
         if general_only:
             note = "Đang gợi ý đa khoa theo lựa chọn của bạn."
         elif not mapping.specialties:
             note = "Đang gợi ý chung (đa khoa) vì chưa đủ thông tin để chọn chuyên khoa."
+        elif assumed_labels:
+            note = ("Một phần mô tả chưa có trong bảng; Bụt tạm đoán chuyên khoa "
+                    + ", ".join(assumed_labels) + ", kèm cơ sở đa khoa để bạn chọn.")
         elif found.unmapped:
             note = "Một phần mô tả chưa có trong bảng triệu chứng; đang gợi ý theo phần còn lại."
 
@@ -229,7 +244,8 @@ async def suggest(
         "age_group": group,
         "symptoms": symptoms,
         "specialties": [
-            {"key": p.key, "label": catalog.specialty_label(p.key), "role": p.role, "from": p.sources}
+            {"key": p.key, "label": catalog.specialty_label(p.key), "role": p.role, "from": p.sources,
+             "assumed": p.assumed, "reason": p.reason}
             for p in mapping.specialties.values()
         ],
         "fallback_general": True,

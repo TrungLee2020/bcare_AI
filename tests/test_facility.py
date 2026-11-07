@@ -1,6 +1,7 @@
 """Gợi ý cơ sở khám theo triệu chứng (KAN-115)."""
 
 import json
+import logging
 from types import SimpleNamespace
 
 import httpx
@@ -226,6 +227,10 @@ def interp(**overrides):
     base = dict(symptoms=[], unmapped=[], after_trauma=False, mental_health=False,
                 ambiguous_neuro=False, emergency="")
     base.update(overrides)
+    # Chuỗi thì đổi thành mục không có giả định chuyên khoa.
+    base["unmapped"] = [
+        {"text": u, "specialty": "", "reason": ""} if isinstance(u, str) else u for u in base["unmapped"]
+    ]
     return SymptomInterpretation.model_validate(base)
 
 
@@ -333,7 +338,8 @@ async def test_api_tags_only_does_not_call_llm(client, supabase, llm):
     assert data["status"] == "ok"
     assert [f["id"] for f in data["facilities"]] == ["neuro-1", "gen-1"]
     assert data["interpretation"]["specialties"] == [
-        {"key": "than_kinh", "label": "Nội thần kinh", "role": "primary", "from": ["headache", "dizziness"]}
+        {"key": "than_kinh", "label": "Nội thần kinh", "role": "primary", "from": ["headache", "dizziness"],
+         "assumed": False, "reason": ""}
     ]
     assert data["data_version"] == "2026-10-27T00:00:00Z"
     assert llm.calls == []
@@ -615,3 +621,109 @@ async def test_api_mental_phrase_has_no_unmapped_note(client, supabase, llm):
 )
 def test_literal_matches_accent_collisions(text, expected):
     assert catalog.literal_matches(text) == expected
+
+
+# --- Giả định chuyên khoa cho cụm ngoài bảng (KAN-134) -----------------------
+
+def _walk(schema: dict, defs: dict):
+    if "$ref" in schema:
+        yield from _walk(defs[schema["$ref"].split("/")[-1]], defs)
+        return
+    if schema.get("type") == "object":
+        yield schema
+        for sub in schema.get("properties", {}).values():
+            yield from _walk(sub, defs)
+    for key in ("anyOf", "allOf"):
+        for sub in schema.get(key, []):
+            yield from _walk(sub, defs)
+    if "items" in schema:
+        yield from _walk(schema["items"], defs)
+
+
+def test_verify_keeps_allowed_guess_and_drops_excluded():
+    # Enum của schema đã loại tam_than / nhi nên model không trả được; dựng đối tượng thô
+    # để kiểm lớp phòng thủ thứ hai trong verify().
+    raw = interp()
+    raw = SimpleNamespace(**{**raw.__dict__, "unmapped": [
+        SimpleNamespace(text="đau gót chân", specialty="co_xuong_khop", reason="đau gót chân khi đi"),
+        SimpleNamespace(text="hay lo lắng", specialty="tam_than", reason="lo âu"),
+        SimpleNamespace(text="bé hay quấy", specialty="nhi", reason="trẻ quấy"),
+    ]})
+    result = verify(raw, "đau gót chân, hay lo lắng, bé hay quấy")
+    assert result.guesses == [("đau gót chân", "co_xuong_khop", "đau gót chân khi đi")]
+    assert result.unmapped == ["đau gót chân", "hay lo lắng", "bé hay quấy"]
+
+
+def test_guess_reason_is_truncated():
+    raw = interp(unmapped=[{"text": "đau gót chân", "specialty": "co_xuong_khop", "reason": "x" * 200}])
+    assert len(verify(raw, "đau gót chân").guesses[0][2]) == 80
+
+
+def test_table_wins_over_guess():
+    mapping = catalog.map_symptoms(["joint_pain"], "adult", guesses=[("đau gót", "co_xuong_khop", "r")])
+    pick = mapping.specialties["co_xuong_khop"]
+    assert (pick.role, pick.assumed) == ("primary", False)
+
+
+def test_guess_becomes_assumed_secondary():
+    mapping = catalog.map_symptoms([], "adult", guesses=[("nhìn đôi", "mat", "nhìn một thành hai")])
+    pick = mapping.specialties["mat"]
+    assert (pick.role, pick.assumed, pick.reason, pick.sources) == ("secondary", True, "nhìn một thành hai", ["assumed"])
+
+
+def test_assumed_specialty_ranks_level_with_general():
+    general_far = row("g", "Đa khoa xa", is_general=True, lat=HOME[0] + 0.05)
+    eye_near = row("m", "BV Mắt", specialties=["mat"], lat=HOME[0] + 0.01)
+    general_near = row("g2", "Đa khoa gần", is_general=True, lat=HOME[0] + 0.001)
+    mapping = catalog.map_symptoms([], "adult", guesses=[("nhìn đôi", "mat", "nhìn một thành hai")])
+    ranked = ranking.rank(snapshot_of([general_far, eye_near, general_near]), mapping, "adult", *HOME, 50, 10)
+    assert [r.facility.id for r in ranked] == ["g2", "m", "g"]
+    eye = ranked[1]
+    assert eye.match == "secondary"
+    assert eye.reason.startswith("Bụt giả định: nhìn một thành hai → Mắt")
+
+
+@pytest.mark.asyncio
+async def test_api_assumed_specialty_is_labelled(client, supabase, llm):
+    llm.result = interp(unmapped=[{"text": "nhìn đôi", "specialty": "mat", "reason": "nhìn một thành hai"}])
+    data = (await suggest(client, text="mấy hôm nay nhìn đôi")).json()
+    [spec] = data["interpretation"]["specialties"]
+    assert spec == {"key": "mat", "label": "Mắt", "role": "secondary", "from": ["assumed"], "assumed": True,
+                    "reason": "nhìn một thành hai"}
+    assert "Bụt tạm đoán" in data["interpretation"]["note"]
+
+
+@pytest.mark.asyncio
+async def test_api_table_specialty_has_assumed_false(client, supabase, llm):
+    data = (await suggest(client, symptom_tags=["headache"], text=None)).json()
+    assert all(s["assumed"] is False for s in data["interpretation"]["specialties"])
+
+
+@pytest.mark.asyncio
+async def test_unmapped_log_includes_guess(client, supabase, llm, caplog):
+    llm.result = interp(unmapped=[
+        {"text": "nhìn đôi", "specialty": "mat", "reason": "nhìn một thành hai"},
+        {"text": "đau gót chân", "specialty": "", "reason": ""},
+    ])
+    caplog.set_level(logging.INFO)
+    await suggest(client, text="mấy hôm nay nhìn đôi, đau gót chân")
+    lines = [r.getMessage() for r in caplog.records if "facility_unmapped" in r.getMessage()]
+    assert any("guess=mat" in line and "nhìn đôi" in line for line in lines)
+    assert any("guess=none" in line and "đau gót chân" in line for line in lines)
+
+
+def test_schema_is_strict_and_guess_enum_excludes_mental_and_pediatric():
+    schema = SymptomInterpretation.model_json_schema()
+    defs = schema.get("$defs", {})
+    for obj in _walk(schema, defs):
+        assert obj.get("additionalProperties") is False
+        assert set(obj["required"]) == set(obj["properties"])
+    enum_values = None
+    for obj in _walk(schema, defs):
+        if "specialty" in obj.get("properties", {}):
+            sub = obj["properties"]["specialty"]
+            enum_values = defs[sub["$ref"].split("/")[-1]]["enum"] if "$ref" in sub else sub["enum"]
+    assert enum_values is not None
+    assert "" in enum_values
+    assert "tam_than" not in enum_values and "nhi" not in enum_values
+    assert "mat" in enum_values
