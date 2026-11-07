@@ -90,7 +90,7 @@ Token tính theo kích thước điểm ảnh, không theo dung lượng file: g
 
 `OCR_MAX_SIDE` chốt bằng đo (mục 10): chạy bộ ảnh mẫu ở 1024 / 1280 / 1600 / 2048, so `usage.prompt_tokens` thật và độ chính xác, chọn mốc thấp nhất không làm giảm độ chính xác.
 
-**Kết quả đo 2026-11-06** (8 ảnh giả lập từ `scripts/ocr_samples.py`, 12 trường đáp án; chạy `scripts/ocr_benchmark.py`; cả hai model dùng được với khoá API hiện tại):
+**Kết quả đo 2026-11-06** (bộ ảnh giả lập từ `scripts/ocr_samples.py`; benchmark chỉ dùng 5 ảnh có trường đáp án, tổng 12 trường, trong đó 6 trường là của phiếu xét nghiệm; chạy `scripts/ocr_benchmark.py`; cả hai model dùng được với khoá API hiện tại):
 
 ```
 model | max_side | prompt_tokens TB | đúng/tổng

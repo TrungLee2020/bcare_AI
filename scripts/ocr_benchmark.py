@@ -2,9 +2,10 @@
 Đo token và độ chính xác của bước OCR theo kích thước ảnh và model, để chốt
 OCR_MAX_SIDE và OCR_EXTRACT_MODEL (spec mục 4, 10).
 
-    python scripts/ocr_benchmark.py <thư mục ảnh có manifest.json> --sides 1024 1280 1600 2048 --models gpt-5-nano gpt-6-luna
+    PYTHONPATH=. python scripts/ocr_benchmark.py <thư mục ảnh có manifest.json> --sides 1024 1280 1600 2048 --models gpt-5-nano gpt-6-luna
 
-Cần OPENAI_API_KEY trong môi trường. In bảng: model, cạnh dài, token đầu vào
+Cần OPENAI_API_KEY trong môi trường: nạp .env vào môi trường trước khi chạy
+(Git Bash: `set -a && . ./.env; set +a`). In bảng: model, cạnh dài, token đầu vào
 trung bình, số trường đúng / tổng.
 """
 
@@ -21,6 +22,13 @@ from app.services.documents import image
 async def run(folder: Path, sides: list[int], models: list[str]) -> None:
     manifest = [m for m in json.loads((folder / "manifest.json").read_text(encoding="utf-8")) if m["expected"]]
     openai_client.start_openai()
+    try:
+        await _measure(manifest, folder, sides, models)
+    finally:
+        await openai_client.stop_openai()
+
+
+async def _measure(manifest: list[dict], folder: Path, sides: list[int], models: list[str]) -> None:
     print("model | max_side | prompt_tokens TB | đúng/tổng")
     for model in models:
         settings.ocr_extract_model = model
@@ -36,7 +44,6 @@ async def run(folder: Path, sides: list[int], models: list[str]) -> None:
                         total += 1
                         hit += str(item).lower() in text
             print(f"{model} | {side} | {sum(tokens) // len(tokens)} | {hit}/{total}")
-    await openai_client.stop_openai()
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 """Đọc ảnh với OpenAI THẬT trên ảnh giả lập (scripts/ocr_samples.py). Mặc
-định bị skip; chạy khi sửa prompt OCR hoặc đổi model:
+định bị skip; chạy khi sửa prompt OCR hoặc đổi model. Khoá phải có trong môi
+trường (Git Bash: `set -a && . ./.env; set +a`), nếu không các test bị skip:
 
     python -m pytest -m live tests/test_documents_live.py -q
 """
@@ -45,7 +46,12 @@ async def test_classification(samples):
     wrong = []
     for sample in manifest:
         found, _ = await openai_client.classify_document(_prepared(out, sample, settings.ocr_classify_side).data_url)
-        if found.doc_type != sample["doc_type"] or found.readable != sample["readable"]:
+        if not sample["readable"]:
+            # Ảnh mờ: loại giấy tờ không xác định được; điều cần đảm bảo là không bị đưa đi OCR.
+            ok = found.doc_type == "not_medical" or found.readable is False
+        else:
+            ok = found.doc_type == sample["doc_type"] and found.readable == sample["readable"]
+        if not ok:
             wrong.append((sample["file"], found.doc_type, found.readable))
     assert wrong == []
 

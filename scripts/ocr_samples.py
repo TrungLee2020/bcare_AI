@@ -141,6 +141,9 @@ def generate(out_dir: Path, font_path: str | None = None) -> list[dict]:
         manifest.append({k: sample[k] for k in ("file", "doc_type", "readable", "expected")})
     _food().save(out_dir / "food.jpg", "JPEG", quality=90)
     manifest.append({"file": "food.jpg", "doc_type": "not_medical", "readable": True, "expected": {}})
+    # Mẫu âm tính: ảnh KHÔNG phải giấy tờ y tế và bị nhoè; cũng không được đưa đi OCR.
+    _food().filter(ImageFilter.GaussianBlur(9)).save(out_dir / "food_blurry.jpg", "JPEG", quality=90)
+    manifest.append({"file": "food_blurry.jpg", "doc_type": "not_medical", "readable": False, "expected": {}})
     (out_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=1), encoding="utf-8")
     return manifest
 
