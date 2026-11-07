@@ -75,7 +75,8 @@ Mọi response có `interpretation` và `data_version` (`max(updated_at)` của 
     { "key": "dizziness", "name": "Chóng mặt", "source": "text", "matched_text": "hay choáng" }
   ],
   "specialties": [
-    { "key": "than_kinh", "label": "Nội thần kinh", "role": "primary", "from": ["headache", "dizziness"] }
+    { "key": "than_kinh", "label": "Nội thần kinh", "role": "primary", "from": ["headache", "dizziness"],
+      "assumed": false, "reason": "" }
   ],
   "fallback_general": true,
   "unmapped_text": [],
@@ -85,6 +86,7 @@ Mọi response có `interpretation` và `data_version` (`max(updated_at)` của 
 
 - `role`: `primary` | `secondary`. Đa khoa không nằm trong danh sách này; `fallback_general: true` nghĩa là cơ sở đa khoa được dùng làm dự phòng (hiện luôn true).
 - `symptoms[].key`: thẻ của app, **hoặc** key triệu chứng bổ sung (mục 4.1, vd `toothache`, `menstrual`) khi `source` là `text`. App hiển thị theo `name`, không tra key trong danh sách thẻ của app.
+- `assumed` / `reason`: luôn có ở mỗi mục. `assumed: true` khi chuyên khoa do Bụt giả định (mục 4.3), kèm `reason` (≤ 80 ký tự); mục từ bảng có `assumed: false` và `reason: ""`.
 - `from`: key triệu chứng dẫn tới chuyên khoa, hoặc `mental` (người dùng nói rõ vấn đề tinh thần), `choice` (người dùng chọn ở câu hỏi làm rõ).
 - `unmapped_text`: phần câu gõ không khớp thẻ nào (vd. `["đau răng"]`).
 - `note`: câu giải thích khi đang gợi ý chung (không có chuyên khoa nào), khi một phần mô tả chưa có trong bảng, hoặc khi chưa đọc được câu gõ (LLM lỗi). `null` khi không có gì cần nói.
@@ -259,11 +261,12 @@ Model nhỏ có lúc đặt đúng từ đồng nghĩa vào `unmapped` ("sổ m�
 
 Cụm triệu chứng không có trong bảng đã duyệt (vd. "đau gót chân mỗi sáng", "nhìn một thành hai") không còn rơi vào chỗ trống: model đề xuất một chuyên khoa kèm lý do ngắn, service kiểm rồi dùng làm gợi ý có nhãn.
 
-- Schema: mục trong `interpretation.specialties[]` có thêm `assumed` (`true` khi do Bụt giả định, `false` với mục từ bảng) và `reason` (tối đa 80 ký tự, chỉ có khi `assumed: true`). Mục giả định có `role: "secondary"` và `from: ["assumed"]`.
+- Schema: mục trong `interpretation.specialties[]` có thêm `assumed` (`true` khi do Bụt giả định, `false` với mục từ bảng) và `reason` (tối đa 80 ký tự; luôn có mặt, bằng `""` khi `assumed: false`). Mục giả định có `role: "secondary"` và `from: ["assumed"]`.
 - Xếp hạng: cơ sở chỉ khớp chuyên khoa giả định xếp **ngang đa khoa**, dưới cơ sở khớp chuyên khoa từ bảng. `facilities[].match` vẫn là `secondary`, `reason` của cơ sở bắt đầu bằng "Bụt giả định: …".
 - Bảng đã duyệt luôn thắng: chuyên khoa vừa có từ bảng vừa được giả định giữ vai của bảng, `assumed: false`.
 - `interpretation.note` giải thích: "Một phần mô tả chưa có trong bảng; Bụt tạm đoán chuyên khoa …, kèm cơ sở đa khoa để bạn chọn."
-- Không bao giờ giả định Tâm thần – Tâm lý (`tam_than`) hay Nhi (`nhi`); hai chuyên khoa này chỉ đi theo bảng / cờ.
+- Không bao giờ giả định `tam_than`, `nhi`, `ung_buou`, `y_hoc_co_truyen`: Tâm thần và Nhi chỉ đi theo bảng / cờ; "Ung bướu" đoán sai làm người dùng hoảng (khối u đi qua thẻ "khối u" đã duyệt); Y học cổ truyền là lựa chọn của người dùng, không phải chuyên khoa theo triệu chứng.
+- Giả định chỉ hoạt động khi `FACILITY_PROMPT_VERSION` ≥ `v3` (luật giả định nằm trong prompt đó). Với `v1` / `v2`, service không đưa bảng chuyên khoa cho model và bỏ qua mọi giả định; cụm ngoài bảng vẫn được ghi log với `guess=none`.
 - Log: `facility_unmapped phrase=… guess=<mã chuyên khoa hoặc none> group=…` (không user id, không toạ độ); metric `facility_guess_<mã>`, `facility_guess_none`.
 - App: hiển thị mục `assumed: true` với nhãn "Bụt giả định" kèm `reason`.
 - Product: xem log `guess=` định kỳ; cụm nào đúng thì đưa vào `app/facility_data/extra_symptoms.json` để thành mapping đã duyệt.

@@ -101,12 +101,12 @@ data: {"type":"delta","text":"Đau đầu kéo dài 3 ngày "}
 
 data: {"type":"delta","text":"có nhiều nguyên nhân..."}
 
-data: {"type":"done","conversation_id":"…","should_see_doctor":false,"follow_up_questions":["…"],"quota_remaining":1}
+data: {"type":"done","conversation_id":"…","should_see_doctor":false,"follow_up_questions":["…"],"quota_remaining":1,"disclaimer":"Thông tin mang tính tham khảo, không thay thế khám chữa bệnh."}
 ```
 
 - Dòng bắt đầu bằng `:` là comment giữ kết nối, gửi mỗi 15 giây trong lúc chờ. App bỏ qua.
 - Câu trả lời được sinh xong rồi mới chia thành nhiều `delta` (khoảng 40 ký tự/phần). Nối các `text` lại ra đúng nguyên văn.
-- `done` có thêm `should_see_doctor`, `follow_up_questions`, `quota_remaining`. App chưa dùng thì bỏ qua.
+- `done` có thêm `should_see_doctor`, `follow_up_questions`, `quota_remaining`, `disclaimer`. App chưa dùng thì bỏ qua.
 - Lỗi sau khi stream đã mở (quá 120 giây, lỗi model): `data: {"type":"error","code":"unavailable","message":"…"}` rồi đóng. Lượt đó được hoàn.
 - App bỏ qua mọi `type` lạ.
 
