@@ -182,6 +182,17 @@ async def soft_delete_document(db: AsyncSession, document_id: UUID, user_id: str
     return doc
 
 
+async def soft_delete_all_documents(db: AsyncSession, user_id: str) -> list[HealthDocument]:
+    """Ẩn mọi tài liệu của user (xoá tài khoản). Trả về các tài liệu vừa ẩn để
+    nơi gọi xoá ảnh trên Storage."""
+    stmt = select(HealthDocument).where(HealthDocument.user_id == user_id, HealthDocument.deleted_at.is_(None))
+    docs = list((await db.execute(stmt)).scalars())
+    now = _now()
+    for doc in docs:
+        doc.deleted_at = now
+    return docs
+
+
 async def purge_deleted_documents(db: AsyncSession, deleted_before: datetime) -> int:
     """Xoá hẳn tài liệu đã ẩn trước `deleted_before`. Xoá OCR / bản trích xuất
     tường minh: SQLite (test) chỉ cascade khi bật PRAGMA foreign_keys."""

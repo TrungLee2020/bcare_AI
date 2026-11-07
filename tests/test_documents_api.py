@@ -274,3 +274,81 @@ async def test_done_duplicate_is_not_downgraded(client, files, kafka, monkeypatc
     resp = await client.post("/v1/chat", json=with_images(f"{USER}/b.jpg", text="hỏi"), headers={**auth(), **JSON})
     assert (resp.status_code, resp.json()["error"]) == (429, "quota_exceeded")
     assert (await _status(document_id))[0] == "done"
+
+
+OTHER_USER = "11111111-2222-4333-8444-555555555555"
+
+
+async def test_idempotent_retry_does_not_reopen_documents(client, files, kafka):
+    files.objects[f"{USER}/a.jpg"] = jpeg()
+    headers = {**auth(), **JSON, "Idempotency-Key": "k1"}
+    first = (await client.post("/v1/chat", json=with_images(f"{USER}/a.jpg"), headers=headers)).json()
+    document_id = first["documents"][0]["id"]
+    async with db_session() as db:
+        await repo.set_status(db, kafka.published[0].document_ids[0], "failed", meta={"reason": "model_error"})
+
+    again = await client.post("/v1/chat", json=with_images(f"{USER}/a.jpg"), headers=headers)
+    assert again.status_code == 200
+    assert [d["id"] for d in again.json()["documents"]] == [document_id]
+    assert len(kafka.published) == 1
+    assert (await _status(document_id))[0] == "failed"
+
+
+async def _other_users_document(path: str):
+    from uuid import uuid4
+
+    async with db_session() as db:
+        doc = await repo.create_document(
+            db, document_id=uuid4(), user_id=OTHER_USER, conversation_id=None, profile_id=None,
+            storage_path=path, sha256="f" * 64,
+        )
+        return doc.id
+
+
+async def test_delete_all_documents_only_touches_the_owner(client, files, kafka):
+    files.objects[f"{USER}/a.jpg"] = jpeg()
+    files.objects[f"{USER}/b.jpg"] = jpeg((0, 0, 0))
+    await client.post("/v1/chat", json=with_images(f"{USER}/a.jpg", f"{USER}/b.jpg"), headers={**auth(), **JSON})
+    other_id = await _other_users_document(f"{OTHER_USER}/x.jpg")
+    assert len(await _all_documents(client)) == 2
+
+    assert (await client.delete("/v1/documents", headers=auth())).status_code == 204
+    assert await _all_documents(client) == []
+    assert sorted(files.deleted) == [f"{USER}/a.jpg", f"{USER}/b.jpg"]
+    others = (await client.get("/v1/documents", headers=auth(sub=OTHER_USER))).json()["documents"]
+    assert [d["id"] for d in others] == [str(other_id)]
+
+
+async def test_delete_all_documents_survives_storage_errors(client, files, kafka, monkeypatch):
+    files.objects[f"{USER}/a.jpg"] = jpeg()
+    await client.post("/v1/chat", json=with_images(f"{USER}/a.jpg"), headers={**auth(), **JSON})
+
+    async def broken(path, token):
+        raise storage.StorageError("HTTP 500")
+
+    monkeypatch.setattr(storage, "delete", broken)
+    assert (await client.delete("/v1/documents", headers=auth())).status_code == 204
+    assert await _all_documents(client) == []
+
+
+async def test_cannot_delete_another_users_document(client, files, kafka):
+    other_id = await _other_users_document(f"{OTHER_USER}/x.jpg")
+    resp = await client.delete(f"/v1/documents/{other_id}", headers=auth())
+    assert (resp.status_code, resp.json()["error"]) == (404, "not_found")
+    assert files.deleted == []
+    others = (await client.get("/v1/documents", headers=auth(sub=OTHER_USER))).json()["documents"]
+    assert [d["id"] for d in others] == [str(other_id)]
+
+
+async def test_documents_naive_cursor_is_treated_as_utc(client, monkeypatch):
+    seen = {}
+    real = v1.documents_repository.list_documents
+
+    async def spy(db, user_id, limit, before=None, doc_type=None):
+        seen["before"] = before
+        return await real(db, user_id, limit, before, doc_type)
+
+    monkeypatch.setattr(v1.documents_repository, "list_documents", spy)
+    resp = await client.get("/v1/documents?cursor=2026-11-07T10:00:00", headers=auth())
+    assert resp.status_code == 200
+    assert seen["before"].utcoffset() is not None and seen["before"].utcoffset().total_seconds() == 0
