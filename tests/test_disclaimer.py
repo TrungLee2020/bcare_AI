@@ -47,3 +47,37 @@ def test_for_display_only_strips_when_flag_on(monkeypatch):
 
 def test_default_disclaimer_text():
     assert settings.chat_disclaimer == "Thông tin mang tính tham khảo, không thay thế khám chữa bệnh."
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Bạn nên tham khảo ý kiến dược sĩ; thực phẩm chức năng không thay thế thuốc chữa bệnh.",
+        "Hãy tham khảo bác sĩ vì thuốc bổ không thay thế được thuốc huyết áp.",
+    ],
+)
+def test_strip_keeps_medical_advice_with_similar_words(text):
+    assert disclaimer.strip(text) == text
+    assert disclaimer.strip("Nghỉ ngơi nhé. " + text) == "Nghỉ ngơi nhé. " + text
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        "Thông tin mang tính tham khảo, không thay thế khám chữa bệnh.",
+        "Đây chỉ là tham khảo, không thay thế khám chữa bệnh.",
+        "Đây là thông tin tham khảo, không thay thế khám chữa bệnh trực tiếp.",
+    ],
+)
+def test_strip_removes_disclaimer_shapes(sentence):
+    assert disclaimer.strip("Nghỉ ngơi nhé. " + sentence) == "Nghỉ ngơi nhé."
+
+
+def test_strip_keeps_layout_of_other_text():
+    text = "Gạch đầu dòng:\n- Uống nước.\n- Nghỉ ngơi.\n\nĐây là thông tin tham khảo, không thay thế khám chữa bệnh trực tiếp."
+    assert disclaimer.strip(text) == "Gạch đầu dòng:\n- Uống nước.\n- Nghỉ ngơi."
+
+
+def test_strip_middle_sentence_keeps_rest_as_is():
+    text = "Ý một.\n\nThông tin mang tính tham khảo, không thay thế khám chữa bệnh. Ý hai.\n- mục"
+    assert disclaimer.strip(text) == "Ý một.\n\nÝ hai.\n- mục"
