@@ -23,9 +23,9 @@ Nguyên tắc KAN-115 giữ nguyên cho phần có trong bảng: bảng đã duy
 
 - Schema: `unmapped` đổi từ `list[str]` thành `list[{text, specialty, reason}]`:
   - `text`: đoạn chữ nguyên văn (như cũ, phải có trong câu gõ — `_grounded`).
-  - `specialty`: một mã trong `specialties.json` trừ `tam_than` và `nhi`, hoặc `""` khi không đủ chắc.
+  - `specialty`: một mã trong `specialties.json` trừ `tam_than`, `nhi`, `ung_buou`, `y_hoc_co_truyen`, hoặc `""` khi không đủ chắc.
   - `reason`: ≤ 80 ký tự, tiếng Việt, nêu triệu chứng dẫn tới chuyên khoa (vd "ù tai kéo dài là bệnh tai").
-- Prompt đưa kèm bảng 19 chuyên khoa (key, nhãn, triệu chứng điển hình — từ `specialties.json`, nguồn: bảng tham khảo trong KAN-115) làm căn cứ. Quy tắc: chỉ chọn khi triệu chứng thuộc rõ một chuyên khoa; không chọn theo chữ giống nhau; không chọn Tâm thần (chỉ qua cờ `mental_health`) hay Nhi (đã lọc theo tuổi); không chắc thì `""`.
+- Prompt đưa kèm bảng 19 chuyên khoa (key, nhãn, triệu chứng điển hình — từ `specialties.json`, nguồn: bảng tham khảo trong KAN-115) làm căn cứ. Quy tắc: chỉ chọn khi triệu chứng thuộc rõ một chuyên khoa; không chọn theo chữ giống nhau; không chọn Tâm thần (chỉ qua cờ `mental_health`), Nhi (đã lọc theo tuổi), Ung bướu (khối u đi qua thẻ đã duyệt) hay Y học cổ truyền (lựa chọn của người dùng); không chắc thì `""`.
 - Đổi version prompt → cache đọc câu gõ 24 giờ tự làm mới.
 - Code kiểm lại: `specialty` không thuộc danh sách cho phép → coi như `""`. `reason` cắt 80 ký tự.
 
@@ -77,11 +77,15 @@ Nguyên tắc KAN-115 giữ nguyên cho phần có trong bảng: bảng đã duy
 
 ## 5. Kiểm thử đơn vị
 
-- (c) schema `unmapped` mới strict-valid; `specialty` ngoài danh sách cho phép / `tam_than` / `nhi` bị bỏ; `guesses` vào mapping với `assumed`; chuyên khoa vừa có từ bảng vừa giả định giữ vai của bảng; xếp hạng ngang đa khoa; response có `assumed`, `reason`, `note`; log `guess=`.
+- (c) schema `unmapped` mới strict-valid; `specialty` ngoài danh sách cho phép / `tam_than` / `nhi` / `ung_buou` / `y_hoc_co_truyen` bị bỏ; `FACILITY_PROMPT_VERSION` < v3 thì không giả định; `guesses` vào mapping với `assumed`; chuyên khoa vừa có từ bảng vừa giả định giữ vai của bảng; xếp hạng ngang đa khoa; response có `assumed`, `reason`, `note`; log `guess=`.
 - (a) `disclaimer` có ở JSON, SSE `done`, câu chào, khủng hoảng, ảnh không câu hỏi, lịch sử; cờ bật → dòng có dấu bị bỏ khỏi prompt, câu disclaimer bị xoá khỏi `answer`, câu khác giữ nguyên; cờ tắt → không đổi.
 - (b) `absolute_claims` khớp / không khớp (có dấu, không dấu, phủ định "không chắc chắn" vẫn tính — chấp nhận, chỉ để đo); metric tăng, câu trả lời không đổi; v8 không bị coi là lộ prompt với câu trả lời mẫu.
 
-## 6. Việc cần người khác
+## 6. Triển khai
+
+Production hiện ghim `PROMPT_VERSION=v6` và `FACILITY_PROMPT_VERSION=v1`. Để có tính năng này phải đặt `PROMPT_VERSION=v8`, `FACILITY_PROMPT_VERSION=v3`; giữ `CHAT_DISCLAIMER_IN_APP=false` cho tới khi App phát hành phần hiển thị `disclaimer`. Với `FACILITY_PROMPT_VERSION` < v3 giả định chuyên khoa tự tắt.
+
+## 6.1 Việc cần người khác
 
 - Team App (@ Hiếu): hiển thị `disclaimer` cố định dưới mỗi tin của Bụt, không bị che khi cuộn; báo bản phát hành để bên AI bật `CHAT_DISCLAIMER_IN_APP`. App hiển thị mục chuyên khoa có `assumed: true` kèm nhãn "Bụt giả định" và `reason`.
 - Product (Tristan): duyệt log giả định định kỳ; gửi tài liệu KAN-132 khi có.
@@ -99,3 +103,9 @@ Nguyên tắc KAN-115 giữ nguyên cho phần có trong bảng: bảng đã duy
 - Ghi chú: trường hợp trên vẫn ra chuyên khoa đúng (`joint_pain` → cơ xương khớp), chỉ là không gắn nhãn "Bụt giả định". Test không được nới.
 
 **Đo lại giả định chuyên khoa (fix round 1):** test live chấm theo kết quả, không theo đường đi. Test dựng mapping cuối như service (`catalog.map_symptoms` với triệu chứng, cờ và `guesses`), rồi kiểm: (1) tập chuyên khoa đã map giao với tập chấp nhận của câu (đến đúng chuyên khoa bằng bảng hoặc bằng giả định đều tính; bảng thắng giả định là chủ đích); (2) mọi mã giả định nằm trong tập chấp nhận; (3) không có `tam_than` / `nhi` ở mục giả định. Ba câu và tập chấp nhận giữ nguyên, không sửa prompt thêm. Kết quả: lần 1 xanh 3/3, lần 2 xanh 3/3 (câu đau gót chân lần 1 đến `co_xuong_khop` qua thẻ `joint_pain`, lần 2 qua giả định).
+
+**Câu giữ lại (held-out, final review F6)** (`tests/test_facility_live.py`, 8 test: 6 câu có tập chấp nhận + 2 câu mơ hồ phải không có giả định; không sửa prompt, đây là số đo): lần 1 xanh 7/8, lần 2 xanh 7/8.
+- Lần 1 đỏ: "tê đầu lưỡi mấy hôm nay" (`unmapped` có cụm nhưng `specialty` rỗng, không chuyên khoa nào được map).
+- Lần 2 đỏ: "ngứa hậu môn nhiều tuần nay" (câu cũ, lần này `specialty` rỗng); "tê đầu lưỡi" lần này đạt (giả định `rang_ham_mat`).
+- Đạt cả hai lần: "móng tay vàng và dày lên" (`da_lieu`), "chuột rút bắp chân ban đêm" (`co_xuong_khop`), cả hai câu mơ hồ (`guesses == []`).
+- Nhận xét: giả định cho câu lạ khá ổn định nhưng model đôi khi để `specialty` rỗng; kết quả đúng chuyên khoa vẫn đến qua thẻ hoặc không đến (rơi về đa khoa), không sai chuyên khoa nguy hiểm.

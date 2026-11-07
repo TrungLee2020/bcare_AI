@@ -24,7 +24,14 @@ CASES = [
     ("đau gót chân mỗi sáng khi mới bước xuống giường", {"co_xuong_khop"}),
     ("mấy hôm nay nhìn một thành hai", {"mat", "than_kinh"}),
     ("ngứa hậu môn nhiều tuần nay", {"da_lieu", "ngoai_tong_quat", "tieu_hoa"}),
+    # Câu giữ lại (held-out): không xuất hiện làm ví dụ trong prompt facility_v3.
+    ("móng tay vàng và dày lên", {"da_lieu"}),
+    ("chuột rút bắp chân ban đêm", {"co_xuong_khop", "than_kinh"}),
+    ("tê đầu lưỡi mấy hôm nay", {"than_kinh", "tai_mui_hong", "rang_ham_mat"}),
 ]
+
+# Câu mơ hồ: không được sinh giả định.
+VAGUE = ["người cứ thấy sao sao", "dạo này không khoẻ lắm"]
 
 
 @pytest.fixture(autouse=True)
@@ -52,5 +59,15 @@ async def test_gia_dinh_chuyen_khoa_nam_trong_tap_chap_nhan(text, accepted):
     assert set(mapping.specialties) & accepted, (text, result, mapping.specialties)
     guess_codes = {code for _, code, _ in result.guesses}
     assert guess_codes <= accepted, (text, result.guesses)
-    assert not guess_codes & {"tam_than", "nhi"}, (text, result.guesses)
-    assert not {k for k, p in mapping.specialties.items() if p.assumed} & {"tam_than", "nhi"}
+    assert not guess_codes & catalog.GUESS_EXCLUDED, (text, result.guesses)
+    assert not {k for k, p in mapping.specialties.items() if p.assumed} & catalog.GUESS_EXCLUDED
+
+
+@pytest.mark.parametrize("text", VAGUE)
+async def test_cau_mo_ho_khong_sinh_gia_dinh(text):
+    raw, _ = await openai_client.interpret_symptoms(
+        text, suggest._system_prompt(), SymptomInterpretation
+    )
+    result = verify(raw, text)
+    print("GUESSES:", text, "=>", result.guesses)
+    assert result.guesses == [], (text, result.guesses)

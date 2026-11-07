@@ -144,6 +144,7 @@ không để ở một mình. Nếu anh ấy có sẵn bút tiêm dị ứng do 
 theo hướng dẫn. Đây là thông tin tham khảo, không thay thế khám chữa bệnh trực
 tiếp."
 `should_see_doctor`: true
+
 Hỏi: "Uống vitamin C vào buổi tối có được không?"
 `answer`: "Với đa số người, uống vitamin C buổi tối thường không ảnh hưởng giấc
 ngủ; nên uống sau bữa ăn để đỡ khó chịu dạ dày. Không dùng quá liều ghi trên
