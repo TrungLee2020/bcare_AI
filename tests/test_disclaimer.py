@@ -80,5 +80,4 @@ def test_strip_keeps_layout_of_other_text():
 
 def test_strip_middle_sentence_keeps_rest_as_is():
     text = "Ý một.\n\nThông tin mang tính tham khảo, không thay thế khám chữa bệnh. Ý hai.\n- mục"
-    assert disclaimer.strip(text) == "Ý một. Ý hai.
-- mục"
+    assert disclaimer.strip(text) == "Ý một. Ý hai.\n- mục"
