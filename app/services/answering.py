@@ -108,6 +108,14 @@ async def answer_question(
         metrics.incr("output_blocked")
         return _response(outcome.answer, "blocked", outcome.detail, usage)
 
+    claims = output_validator.absolute_claims(outcome.answer.answer)
+    if claims:
+        metrics.incr("answer_absolute_claim")
+        for name in claims:
+            metrics.incr(f"answer_absolute_claim_{name}")
+        # Không log câu trả lời: chỉ tên mẫu, để biết prompt cần sửa ở đâu.
+        logger.info("Câu trả lời có cụm tuyệt đối request_id=%s patterns=%s", message.request_id, claims)
+
     return _response(outcome.answer, "ok", usage=usage)
 
 

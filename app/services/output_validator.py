@@ -96,6 +96,25 @@ _COMPILED_PRESCRIPTION = [re.compile(p) for p in _PRESCRIPTION_PATTERNS]
 _COMPILED_DIAGNOSIS = [re.compile(p) for p in _DIAGNOSIS_PATTERNS]
 _COMPILED_EMERGENCY = [re.compile(p) for p in _EMERGENCY_PATTERNS]
 
+# Cụm khẳng định tuyệt đối (KAN-134). Chỉ để ĐO: không chặn, không sửa câu.
+# Viết ở dạng đã bỏ dấu (normalize()). "Tuyệt đối không tự ý..." là lời dặn an
+# toàn nên mẫu tuyet_doi chỉ bắt "tuyệt đối an toàn / không sao / không hại".
+_ABSOLUTE_PATTERNS: list[tuple[str, str]] = [
+    ("khong_sao_ca", r"\bkhong sao ca\b"),
+    ("chac_chan", r"\bchac chan\b"),
+    ("hoan_toan_an_toan", r"\bhoan toan an toan\b"),
+    ("hoan_toan_binh_thuong", r"\bhoan toan binh thuong\b"),
+    ("tuyet_doi", r"\btuyet doi (an toan|khong (sao|anh huong|co hai))\b"),
+    ("100_phan_tram", r"\b100 ?(%|phan tram)"),
+    ("dam_bao_khoi", r"\bdam bao (se )?(khoi|het)\b"),
+]
+_COMPILED_ABSOLUTE = [(name, re.compile(p)) for name, p in _ABSOLUTE_PATTERNS]
+
+
+def absolute_claims(text: str) -> list[str]:
+    normalized = normalize(text)
+    return [name for name, pattern in _COMPILED_ABSOLUTE if pattern.search(normalized)]
+
 
 def mentions_emergency(text: str) -> bool:
     normalized = normalize(text)
