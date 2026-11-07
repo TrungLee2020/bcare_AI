@@ -18,6 +18,9 @@ async def start_db() -> None:
         pool_size=settings.db_pool_size,
         max_overflow=settings.db_max_overflow,
         pool_pre_ping=True,  # tránh dùng lại connection đã chết sau khi DB restart
+        # Không đưa tham số SQL vào thông báo lỗi: logger.exception khi DB lỗi sẽ
+        # in storage_path, sha256, chữ OCR, câu hỏi của user.
+        hide_parameters=True,
     )
     _sessionmaker = async_sessionmaker(_engine, expire_on_commit=False)
     logger.info("Database pool sẵn sàng")
