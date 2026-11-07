@@ -216,6 +216,10 @@ async def suggest(
         mapping.specialties.setdefault(clarify_choice, catalog.SpecialtyPick(clarify_choice, "primary", []))
         pick = mapping.specialties[clarify_choice]
         pick.role = "primary"
+        # Người dùng chọn thắng giả định của model.
+        pick.assumed = False
+        pick.reason = ""
+        pick.sources = [s for s in pick.sources if s != "assumed"]
         if "choice" not in pick.sources:
             pick.sources.append("choice")
 

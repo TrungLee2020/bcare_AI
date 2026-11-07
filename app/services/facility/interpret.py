@@ -155,7 +155,9 @@ def verify(raw: BaseModel, text: str) -> Interpretation:
         specialty = item.specialty.value if isinstance(item.specialty, enum.Enum) else str(item.specialty)
         # Chỉ cụm được giữ mới tạo giả định; tam_than / nhi không bao giờ được giả định.
         if specialty and specialty in catalog.guessable_specialties():
-            guesses.append((text_kept, specialty, item.reason.strip()[:MAX_REASON_CHARS]))
+            # Không có lý do thì lấy chính cụm chữ làm lý do.
+            reason = (item.reason.strip() or text_kept)[:MAX_REASON_CHARS]
+            guesses.append((text_kept, specialty, reason))
     kept = unmapped[:MAX_UNMAPPED]
     return Interpretation(
         symptoms=symptoms,

@@ -727,3 +727,38 @@ def test_schema_is_strict_and_guess_enum_excludes_mental_and_pediatric():
     assert "" in enum_values
     assert "tam_than" not in enum_values and "nhi" not in enum_values
     assert "mat" in enum_values
+
+
+def test_guess_with_empty_reason_uses_phrase_text():
+    raw = interp(unmapped=[{"text": "nhìn đôi", "specialty": "mat", "reason": "  "}])
+    assert verify(raw, "nhìn đôi").guesses == [("nhìn đôi", "mat", "nhìn đôi")]
+
+
+def test_general_facility_with_assumed_specialty_not_worse_than_general():
+    both = row("b", "Đa khoa có mắt", specialties=["mat"], is_general=True, lat=HOME[0] + 0.02)
+    plain = row("p", "Đa khoa thường", is_general=True, lat=HOME[0] + 0.03)
+    mapping = catalog.map_symptoms([], "adult", guesses=[("nhìn đôi", "mat", "r")])
+    ranked = ranking.rank(snapshot_of([plain, both]), mapping, "adult", *HOME, 50, 10)
+    assert [r.facility.id for r in ranked] == ["b", "p"]
+    assert ranked[0].match == "secondary"
+
+
+def test_mixed_approved_and_assumed_hits():
+    fac = row("x", "BV đa chuyên khoa", specialties=["than_kinh", "mat"])
+    mapping = catalog.map_symptoms(["headache"], "adult", guesses=[("nhìn đôi", "mat", "nhìn một thành hai")])
+    [r] = ranking.rank(snapshot_of([fac]), mapping, "adult", *HOME, 50, 10)
+    assert r.match == "primary"
+    assert set(r.matched_specialties) == {"than_kinh", "mat"}
+    assert "Bụt giả định" in r.reason and "Đau đầu" in r.reason
+
+
+@pytest.mark.asyncio
+async def test_clarify_choice_beats_assumed_guess(client, supabase, llm):
+    llm.result = interp(unmapped=[{"text": "đau gót chân", "specialty": "than_kinh", "reason": "nghi dây thần kinh"}])
+    data = (await suggest(client, text="đau gót chân mấy hôm", clarify_choice="than_kinh")).json()
+    [spec] = data["interpretation"]["specialties"]
+    assert (spec["key"], spec["role"], spec["assumed"], spec["reason"]) == ("than_kinh", "primary", False, "")
+    assert "assumed" not in spec["from"]
+    assert "Bụt tạm đoán" not in (data["interpretation"]["note"] or "")
+    ids = [f["id"] for f in data["facilities"]]
+    assert ids.index("neuro-1") < ids.index("gen-1")
