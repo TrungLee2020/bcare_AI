@@ -6,10 +6,11 @@ Cách điền:
 - "symptoms": mỗi triệu chứng người dùng NÓI LÀ ĐANG CÓ, khớp với một thẻ trong danh sách (theo tên, từ đồng nghĩa, hoặc cách nói cùng nghĩa, kể cả viết không dấu). "key" là key của thẻ. "matched_text" chép NGUYÊN VĂN đoạn chữ trong câu người dùng làm căn cứ, không sửa chữ, không thêm dấu.
   - Triệu chứng bị phủ định ("không sốt", "hết ho rồi") thì KHÔNG đưa vào.
   - Viết không dấu dễ nhầm: "dau da day" là đau dạ dày, không phải đau đầu. Chọn thẻ có từ đồng nghĩa khớp trọn đoạn chữ.
+  - Chỉ chọn thẻ khi triệu chứng người dùng nói LÀ CHÍNH triệu chứng của thẻ, không phải một triệu chứng khác cùng vùng cơ thể hoặc gần nghĩa: "nhìn một thành hai" (song thị) không phải "mờ mắt"; "đau gót chân" (gân, cân gan chân) không phải "đau khớp"; "ngứa hậu môn" không phải "trĩ" hay "bệnh da". Không có thẻ nào đúng thì đưa vào "unmapped" kèm chuyên khoa.
   - Không suy ra triệu chứng người dùng không nói. Không chọn thẻ chỉ vì chữ na ná: "thần kinh căng thẳng" không phải "headache"; "nóng trong người" không phải "fever" nếu người dùng không nói sốt.
 - "unmapped": CHỈ các vấn đề sức khoẻ người dùng nói tới mà KHÔNG khớp thẻ nào. Mỗi mục:
   - "text": chép nguyên văn đoạn chữ, ngắn.
-  - "specialty": key chuyên khoa trong danh sách chuyên khoa cuối hướng dẫn mà vấn đề này rõ ràng thuộc về; để "" nếu không chắc. Không chọn theo chữ giống nhau. Danh sách không có Tâm thần và Nhi: vấn đề tinh thần đi qua cờ "mental_health", tuổi do ứng dụng xử lý.
+  - "specialty": key chuyên khoa trong danh sách chuyên khoa cuối hướng dẫn mà vấn đề này rõ ràng thuộc về; chỉ để "" khi vấn đề thật sự mơ hồ, không rõ cơ quan hay vùng cơ thể. Khi vùng cơ thể hoặc loại triệu chứng đã rõ (vd ngứa ngáy → da liễu, vùng hậu môn → tiêu hoá hoặc ngoại tổng quát, gân / xương → cơ xương khớp) thì chọn chuyên khoa gần nhất, đừng để trống. Không chọn theo chữ giống nhau. Danh sách không có Tâm thần và Nhi: vấn đề tinh thần đi qua cờ "mental_health", tuổi do ứng dụng xử lý.
   - "reason": vì sao chọn chuyên khoa đó, tiếng Việt, tối đa 80 ký tự, dựa trên triệu chứng người dùng nói (vd "nhìn một thành hai là vấn đề về mắt"). Để "" nếu "specialty" là "".
   - Một đoạn chữ chỉ nằm ở MỘT chỗ: đã đưa vào "symptoms" thì không đưa vào "unmapped".
   - Vấn đề đã thể hiện bằng cờ "mental_health", "ambiguous_neuro" hoặc "after_trauma" thì không đưa vào "unmapped" (vd "trầm cảm", "lo âu", "khám thần kinh", "té ngã").

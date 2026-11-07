@@ -85,3 +85,15 @@ Nguyên tắc KAN-115 giữ nguyên cho phần có trong bảng: bảng đã duy
 
 - Team App (@ Hiếu): hiển thị `disclaimer` cố định dưới mỗi tin của Bụt, không bị che khi cuộn; báo bản phát hành để bên AI bật `CHAT_DISCLAIMER_IN_APP`. App hiển thị mục chuyên khoa có `assumed: true` kèm nhãn "Bụt giả định" và `reason`.
 - Product (Tristan): duyệt log giả định định kỳ; gửi tài liệu KAN-132 khi có.
+
+## 7. Kết quả đo (2026-11-07, OpenAI thật, `PROMPT_VERSION=v8`, `FACILITY_PROMPT_VERSION=v3`)
+
+**Chat, 10 câu "không khẳng định tuyệt đối ở câu đầu"** (`tests/test_live_openai.py -k khong_khang_dinh`): lần 1 xanh 10/10, lần 2 xanh 10/10, không phải sửa `system_v8`. Ví dụ câu đầu:
+- "Mẹ tôi đang uống thuốc chống đông, uống thêm dầu cá được không?" → "Dầu cá có thể làm tăng nguy cơ chảy máu khi dùng cùng thuốc chống đông, nên bạn không nên tự cho mẹ uống thêm."
+- "Uống vitamin C vào buổi tối có được không?" → "Thông thường, uống vitamin C vào buổi tối không ảnh hưởng đến giấc ngủ của đa số mọi người."
+
+**Giả định chuyên khoa, 3 câu** (`tests/test_facility_live.py`):
+- `facility_v3` bản đầu: lần 1 đỏ 0/3, lần 2 đỏ 0/3. Model gán cụm vào thẻ có sẵn (`joint_pain`, `blurry_vision`, `skin_problem` / `hemorrhoid`) hoặc để `specialty` rỗng nên không có giả định.
+- Sau vòng sửa prompt 1 (chỉ chọn thẻ khi đúng chính triệu chứng đó): 1/3 và 0/3.
+- Sau vòng sửa prompt 2 (chọn chuyên khoa gần nhất khi vùng cơ thể đã rõ, "đau gót chân" không phải "đau khớp"): lần A 3/3, lần B 2/3. **Còn đỏ không ổn định:** "đau gót chân mỗi sáng khi mới bước xuống giường" đôi khi vẫn được model gán vào `joint_pain` (không vào `unmapped`), nên không có giả định. Ví dụ giả định xanh: "nhìn một thành hai" → `mat`, lý do "nhìn đôi có thể liên quan mắt".
+- Ghi chú: trường hợp trên vẫn ra chuyên khoa đúng (`joint_pain` → cơ xương khớp), chỉ là không gắn nhãn "Bụt giả định". Test không được nới.

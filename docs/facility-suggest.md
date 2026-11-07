@@ -4,6 +4,8 @@
 
 **Cập nhật 2026-11-06:** thêm 35 triệu chứng bổ sung ngoài 25 thẻ của app (mục 4.1) và bước đối chiếu nguyên chữ sau khi model đọc câu gõ (mục 4.2), prompt `facility_v2`. Sửa lỗi log production 05/11: "Trầm cảm" bị log `facility_unmapped` và app hiện ghi chú "chưa có trong bảng" dù đã gợi ý đúng Tâm thần – Tâm lý.
 
+**Cập nhật 2026-11-07 (KAN-134):** với cụm ngoài bảng, Bụt giả định một chuyên khoa thay vì chỉ ghi "chưa có trong bảng" (mục 4.3), prompt `facility_v3`.
+
 Code: [`app/services/facility/`](../app/services/facility/), endpoint trong [`app/api/v1.py`](../app/api/v1.py), prompt [`prompts/facility_v1.md`](../prompts/facility_v1.md), dữ liệu [`app/facility_data/`](../app/facility_data/), test [`tests/test_facility.py`](../tests/test_facility.py).
 
 Nguồn: ticket KAN-115, dữ liệu và đề xuất của team App (đo trên DB live 2026-10-29), các file trong [`jsons/`](../jsons/).
@@ -252,6 +254,19 @@ Model nhỏ có lúc đặt đúng từ đồng nghĩa vào `unmapped` ("sổ m�
 - Câu có dấu thì khớp cả dấu ("bị tiêu chảy" không phải "bí tiểu"). Câu không dấu thì không dùng cụm một từ và cụm trùng nhau khi bỏ dấu ("kho tieu", "do mat"); những câu này để model đọc.
 
 Đo 2026-11-06 với `gpt-5-nano`, mỗi câu 2 lần. Trước sửa (30 câu, 60 lượt): 5 lượt mất từ đồng nghĩa có sẵn hoặc hiểu sai ("sổ mũi", "ói", "dau da day", "bong gân"), 16 lượt ra đa khoa vì cụm chưa có trong bảng (đau răng, mờ mắt, trễ kinh, tiểu buốt, ù tai, đau cổ vai gáy, ợ chua). Sau sửa (37 câu, 74 lượt, thêm "Trầm cảm", "lo âu", câu phủ định): không còn lượt nào như vậy; `unmapped` chỉ còn "đau gót chân" (1/2 lượt), đúng là cụm chưa có trong bảng.
+
+## 4.3 Giả định chuyên khoa (KAN-134)
+
+Cụm triệu chứng không có trong bảng đã duyệt (vd. "đau gót chân mỗi sáng", "nhìn một thành hai") không còn rơi vào chỗ trống: model đề xuất một chuyên khoa kèm lý do ngắn, service kiểm rồi dùng làm gợi ý có nhãn.
+
+- Schema: mục trong `interpretation.specialties[]` có thêm `assumed` (`true` khi do Bụt giả định, `false` với mục từ bảng) và `reason` (tối đa 80 ký tự, chỉ có khi `assumed: true`). Mục giả định có `role: "secondary"` và `from: ["assumed"]`.
+- Xếp hạng: cơ sở chỉ khớp chuyên khoa giả định xếp **ngang đa khoa**, dưới cơ sở khớp chuyên khoa từ bảng. `facilities[].match` vẫn là `secondary`, `reason` của cơ sở bắt đầu bằng "Bụt giả định: …".
+- Bảng đã duyệt luôn thắng: chuyên khoa vừa có từ bảng vừa được giả định giữ vai của bảng, `assumed: false`.
+- `interpretation.note` giải thích: "Một phần mô tả chưa có trong bảng; Bụt tạm đoán chuyên khoa …, kèm cơ sở đa khoa để bạn chọn."
+- Không bao giờ giả định Tâm thần – Tâm lý (`tam_than`) hay Nhi (`nhi`); hai chuyên khoa này chỉ đi theo bảng / cờ.
+- Log: `facility_unmapped phrase=… guess=<mã chuyên khoa hoặc none> group=…` (không user id, không toạ độ); metric `facility_guess_<mã>`, `facility_guess_none`.
+- App: hiển thị mục `assumed: true` với nhãn "Bụt giả định" kèm `reason`.
+- Product: xem log `guess=` định kỳ; cụm nào đúng thì đưa vào `app/facility_data/extra_symptoms.json` để thành mapping đã duyệt.
 
 ## 5. Dữ liệu cơ sở
 

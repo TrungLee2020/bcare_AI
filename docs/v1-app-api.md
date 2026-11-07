@@ -113,8 +113,14 @@ data: {"type":"done","conversation_id":"…","should_see_doctor":false,"follow_u
 ### Trả về: JSON (`Accept: application/json`)
 
 ```json
-{"reply":"…","conversation_id":"…","should_see_doctor":false,"follow_up_questions":[],"quota_remaining":1}
+{"reply":"…","conversation_id":"…","should_see_doctor":false,"follow_up_questions":[],"quota_remaining":1,"disclaimer":"Thông tin mang tính tham khảo, không thay thế khám chữa bệnh."}
 ```
+
+### Trường `disclaimer` (KAN-134)
+
+- Có ở response JSON của `POST /v1/chat`, ở event `done` của SSE, và ở mọi tin `assistant` trong `GET /v1/conversations/{id}/messages`. Mọi đường trả lời đều có (câu chào, khủng hoảng / cấp cứu, ảnh không kèm câu hỏi). Giá trị lấy từ cấu hình `CHAT_DISCLAIMER`, mặc định: "Thông tin mang tính tham khảo, không thay thế khám chữa bệnh."
+- App hiển thị cố định dưới mỗi tin của Bụt, không bị che khi cuộn. App cũ bỏ qua trường này.
+- Sau khi bản App hiển thị `disclaimer` phát hành, bên AI bật `CHAT_DISCLAIMER_IN_APP=true`: Bụt thôi tự viết câu "chỉ tham khảo" trong `reply` (prompt bỏ quy tắc đó, câu đứng riêng khớp mẫu bị xoá), tránh hiện hai lần. Hãy báo bên AI khi App đã phát hành.
 
 ## Ảnh giấy tờ y tế (OCR)
 
@@ -261,6 +267,8 @@ Tin nhắn của một hội thoại. Trang đầu là các tin **mới nhất**
   "next_cursor": "1201"
 }
 ```
+
+- Tin `assistant` có thêm `disclaimer` (cùng giá trị như `/v1/chat`).
 
 - `should_see_doctor`, `follow_up_questions` chỉ có ở tin `assistant`. Lượt lưu trước 2026-11-02 có `follow_up_questions: []`.
 - Tin `user` gửi kèm ảnh có thêm `documents`: danh sách id tài liệu (`["uuid", …]`); chi tiết lấy qua `GET /v1/documents/{id}`. Tin chỉ có ảnh có `content` rỗng.
