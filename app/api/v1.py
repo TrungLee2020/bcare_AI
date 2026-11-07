@@ -59,7 +59,7 @@ from app.schemas import (
     V1FacilitySuggestRequest,
     V1MonthlyReportRequest,
 )
-from app.services import consent, cost, idempotency, openai_client, output_validator, quota, rollout, smalltalk
+from app.services import consent, cost, disclaimer, idempotency, openai_client, output_validator, quota, rollout, smalltalk
 from app.services.facility import facilities
 from app.services.facility import suggest as facility_suggest_service
 from app.services.documents import intake, pipeline as documents_pipeline
@@ -258,6 +258,12 @@ async def _wait_for(queue: asyncio.Queue, request_id: UUID, user_id: str) -> Cha
     return None
 
 
+def _display(text: str) -> str:
+    """Bỏ câu "chỉ tham khảo" của model khi app tự hiển thị; không bao giờ trả
+    rỗng (câu trả lời chỉ gồm câu đó thì giữ nguyên)."""
+    return disclaimer.for_display(text).strip() or text
+
+
 def _done_payload(answer: ChatAnswer, conversation_id: UUID, quota_remaining: int | None, documents: list[dict] | None = None) -> dict:
     payload = {
         "type": "done",
@@ -265,6 +271,7 @@ def _done_payload(answer: ChatAnswer, conversation_id: UUID, quota_remaining: in
         "should_see_doctor": answer.should_see_doctor,
         "follow_up_questions": answer.follow_up_questions,
         "quota_remaining": quota_remaining,
+        "disclaimer": settings.chat_disclaimer,
     }
     if documents:
         payload["documents"] = documents
@@ -272,7 +279,7 @@ def _done_payload(answer: ChatAnswer, conversation_id: UUID, quota_remaining: in
 
 
 async def _stream_answer(answer: ChatAnswer, conversation_id: UUID, quota_remaining: int | None, documents: list[dict] | None = None):
-    for index, part in enumerate(_chunks(answer.answer)):
+    for index, part in enumerate(_chunks(_display(answer.answer))):
         if index:
             await asyncio.sleep(DELTA_INTERVAL_SECONDS)
         yield _sse({"type": "delta", "text": part})
@@ -304,11 +311,12 @@ def _respond_now(request: Request, answer: ChatAnswer, conversation_id: UUID, qu
 
 def _json_body(answer: ChatAnswer, conversation_id: UUID, quota_remaining: int | None, documents: list[dict] | None = None) -> dict:
     body = {
-        "reply": answer.answer,
+        "reply": _display(answer.answer),
         "conversation_id": str(conversation_id),
         "should_see_doctor": answer.should_see_doctor,
         "follow_up_questions": answer.follow_up_questions,
         "quota_remaining": quota_remaining,
+        "disclaimer": settings.chat_disclaimer,
     }
     if documents:
         body["documents"] = documents
@@ -710,6 +718,8 @@ def _message_body(message) -> dict:
         "created_at": _iso(message.created_at),
     }
     if message.role == "assistant":
+        body["content"] = _display(message.content)
+        body["disclaimer"] = settings.chat_disclaimer
         body["should_see_doctor"] = bool(message.meta.get("should_see_doctor", False))
         # Lượt ghi trước khi lưu gợi ý vào meta thì không có.
         body["follow_up_questions"] = message.meta.get("follow_up_questions", [])
