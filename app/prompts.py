@@ -177,8 +177,28 @@ def _leak_checked_segments(text: str) -> list[str]:
     return segments
 
 
+APP_DISCLAIMER_MARKER = "<!-- app-disclaimer: drop -->"
+
+
 def load_system_prompt(version: str) -> str:
-    return load_prompt("system", version)
+    # Import trễ để tránh vòng import config <-> prompts nếu có.
+    from app.config import settings
+
+    return _render_system(load_prompt("system", version), settings.chat_disclaimer_in_app)
+
+
+@lru_cache(maxsize=32)
+def _render_system(text: str, app_shows_disclaimer: bool) -> str:
+    """Dòng mang APP_DISCLAIMER_MARKER: App đã hiển thị câu "chỉ tham khảo" thì
+    bỏ cả dòng; chưa thì giữ dòng, chỉ gỡ dấu."""
+    lines = []
+    for line in text.split("\n"):
+        if APP_DISCLAIMER_MARKER in line:
+            if app_shows_disclaimer:
+                continue
+            line = line.replace(APP_DISCLAIMER_MARKER, "").rstrip()
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def available_versions(kind: str = "system") -> list[str]:

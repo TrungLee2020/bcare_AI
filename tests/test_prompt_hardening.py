@@ -255,3 +255,17 @@ def test_v7_cau_tra_loi_giong_mau_khong_bi_coi_la_lo_prompt():
         "hộp thuốc cảm: đã có paracetamol thì không uống thêm."
     )
     assert not leaks_prompt(answer, "system", "v7")
+
+
+def test_v8_sample_answer_is_not_a_prompt_leak():
+    answer = (
+        "Với đa số người, uống vitamin C buổi tối thường không ảnh hưởng giấc ngủ; nên uống sau bữa ăn "
+        "để đỡ khó chịu dạ dày. Không dùng quá liều ghi trên bao bì."
+    )
+    assert not leaks_prompt(answer, "system", "v8")
+
+
+def test_v8_rules_outside_samples_are_still_detected():
+    prompt = load_prompt("system", "v8")
+    rules = prompt[prompt.index("## Quy tắc an toàn tuyệt đối"):][:600]
+    assert leaks_prompt(rules, "system", "v8")
