@@ -16,6 +16,10 @@ ALLOWED_FORMATS = frozenset({"JPEG", "PNG", "WEBP"})
 JPEG_QUALITY = 85
 # Chênh độ sáng so với màu nền (lấy ở 4 góc) để tính là "có nội dung".
 BORDER_TOLERANCE = 24
+# Trần số điểm ảnh, kiểm từ header trước khi giải mã: App gửi ảnh cạnh ≤ 2048 px
+# (~4 MP), ảnh gốc điện thoại ~12–50 MP. Không có trần này, một PNG đồng màu
+# ~150 MP vẫn lọt giới hạn 10 MB nhưng giải mã ra cả GB RAM trong process API.
+MAX_PIXELS = 25_000_000
 
 
 class InvalidImage(Exception):
@@ -29,17 +33,33 @@ class Prepared:
     height: int
 
 
+def _open(data: bytes) -> Image.Image:
+    """Mở ảnh chỉ đọc header (chưa giải mã), kiểm định dạng và trần điểm ảnh."""
+    try:
+        img = Image.open(io.BytesIO(data))
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+        raise InvalidImage("không đọc được ảnh") from exc
+    if img.format not in ALLOWED_FORMATS:
+        raise InvalidImage(f"định dạng {img.format} không hỗ trợ")
+    if img.width * img.height > MAX_PIXELS:
+        raise InvalidImage("ảnh quá nhiều điểm ảnh")
+    return img
+
+
+def validate(data: bytes) -> None:
+    """Kiểm nhanh lúc nhận request: là ảnh, đúng định dạng, không quá trần điểm
+    ảnh. Không giải mã toàn bộ: phần đó consumer làm trong `prepare`."""
+    _open(data)
+
+
 def load(data: bytes) -> Image.Image:
     """Giải mã, xoay theo EXIF, chuyển RGB. Ảnh trả về không mang EXIF (vị trí
     GPS, máy chụp) vì không truyền `exif=` khi lưu lại."""
+    img = _open(data)
     try:
-        img = Image.open(io.BytesIO(data))
-        fmt = img.format
         img.load()
-    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+    except (OSError, Image.DecompressionBombError) as exc:
         raise InvalidImage("không đọc được ảnh") from exc
-    if fmt not in ALLOWED_FORMATS:
-        raise InvalidImage(f"định dạng {fmt} không hỗ trợ")
     return ImageOps.exif_transpose(img).convert("RGB")
 
 

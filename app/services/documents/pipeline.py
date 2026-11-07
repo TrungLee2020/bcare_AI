@@ -94,7 +94,8 @@ async def process(redis: Redis, document_id: UUID) -> str:
         return await _finish(redis, document_id, "failed", reason="image_expired")
     try:
         data = base64.b64decode(raw)
-        small = image.prepare(data, settings.ocr_classify_side, settings.ocr_max_crop_ratio)
+        # Giải mã / cắt / thu nhỏ tốn CPU hàng trăm ms: chạy ở thread, không chặn event loop.
+        small = await asyncio.to_thread(image.prepare, data, settings.ocr_classify_side, settings.ocr_max_crop_ratio)
     except (image.InvalidImage, binascii.Error):
         return await _finish(redis, document_id, "failed", reason="invalid_image")
 
@@ -126,7 +127,7 @@ async def process(redis: Redis, document_id: UUID) -> str:
 
     model = openai_client.extract_model()
     try:
-        large = image.prepare(data, settings.ocr_max_side, settings.ocr_max_crop_ratio)
+        large = await asyncio.to_thread(image.prepare, data, settings.ocr_max_side, settings.ocr_max_crop_ratio)
         extraction, usage = await asyncio.wait_for(
             openai_client.extract_document(large.data_url, found.doc_type), settings.ocr_llm_budget_seconds
         )

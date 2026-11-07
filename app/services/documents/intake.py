@@ -4,6 +4,7 @@ user, kiểm là ảnh, xử lý trùng theo sha256, ghi bản ghi, đặt ảnh
 cho consumer.
 """
 
+import asyncio
 import hashlib
 import logging
 from dataclasses import dataclass
@@ -52,7 +53,8 @@ async def accept(
     except storage.StorageError as exc:
         raise AttachmentRejected(503, "unavailable", "Hệ thống đang bận, vui lòng thử lại sau ít phút.") from exc
     try:
-        image.load(data)
+        # Pillow chạy CPU: đẩy sang thread để không chặn event loop (SSE, request khác).
+        await asyncio.to_thread(image.validate, data)
     except image.InvalidImage as exc:
         raise AttachmentRejected(422, "invalid_attachment", "Tệp gửi lên không phải ảnh JPEG, PNG hoặc WebP.") from exc
 

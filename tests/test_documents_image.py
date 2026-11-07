@@ -2,7 +2,7 @@ import base64
 import io
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageFile
 
 from app.services.documents import image
 
@@ -76,3 +76,42 @@ def test_prepare_strips_exif():
     prepared = image.prepare(data, 512, 0.2)
     decoded = Image.open(io.BytesIO(base64.b64decode(prepared.data_url.split(",", 1)[1])))
     assert len(decoded.getexif()) == 0
+
+
+def huge_png() -> bytes:
+    # 30 MP nhưng chỉ vài chục KB trên đĩa: ảnh 1 bit đồng màu nén rất nhỏ.
+    return encode(Image.new("1", (6000, 5000)), "PNG")
+
+
+def test_load_rejects_image_over_pixel_cap():
+    with pytest.raises(image.InvalidImage):
+        image.load(huge_png())
+
+
+def test_pixel_cap_checked_before_decoding(monkeypatch):
+    def no_decode(self):
+        raise AssertionError("không được giải mã ảnh vượt giới hạn điểm ảnh")
+
+    monkeypatch.setattr(image, "MAX_PIXELS", 100)
+    monkeypatch.setattr(ImageFile.ImageFile, "load", no_decode)
+    with pytest.raises(image.InvalidImage):
+        image.load(encode(Image.new("RGB", (20, 20)), "PNG"))
+
+
+def test_validate_rejects_bytes_that_are_not_an_image():
+    with pytest.raises(image.InvalidImage):
+        image.validate(b"not an image")
+
+
+def test_validate_rejects_gif():
+    with pytest.raises(image.InvalidImage):
+        image.validate(encode(Image.new("RGB", (10, 10)), "GIF"))
+
+
+def test_validate_rejects_image_over_pixel_cap():
+    with pytest.raises(image.InvalidImage):
+        image.validate(huge_png())
+
+
+def test_validate_accepts_jpeg():
+    assert image.validate(encode(Image.new("RGB", (200, 100), "white"))) is None
