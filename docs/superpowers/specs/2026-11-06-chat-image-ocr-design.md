@@ -193,7 +193,8 @@ Không log chữ OCR, dữ liệu trích xuất hay `storage_path`; log chỉ c�
 | `OCR_MAX_ATTACHMENTS` | 3 |
 | `OCR_MAX_IMAGE_BYTES` | 10 MB |
 | `OCR_IMAGE_TTL_SECONDS` | 3600 |
-| `OCR_LLM_BUDGET_SECONDS` | 60 |
+| `OCR_LLM_BUDGET_SECONDS` | 25 (một lần gọi model) |
+| `OCR_MESSAGE_BUDGET_SECONDS` | 30 (cả tin; 30 + trả lời có retry ≈ 78 ≤ `SHUTDOWN_GRACE_SECONDS` 110 < `stop_grace_period` 120) |
 | `OCR_CONTEXT_DOCUMENTS` / `OCR_CONTEXT_MAX_CHARS` | 3 / 4000 |
 | `STORAGE_BUCKET` | `health-documents` |
 

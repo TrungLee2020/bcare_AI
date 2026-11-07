@@ -144,7 +144,7 @@ App upload ảnh lên Supabase Storage (bucket `health-documents`, đường d�
 data: {"type":"done","conversation_id":"…","documents":[{"id":"uuid","status":"received"}],"quota_remaining":1,…}
 ```
 
-Các ảnh của một tin được đọc song song, tổng thời gian tối đa `OCR_MESSAGE_BUDGET_SECONDS` (45 giây). Ảnh chưa đọc xong khi hết giờ chuyển thành `failed`; user gửi lại ảnh đó để đọc lại.
+Các ảnh của một tin được đọc song song, tổng thời gian tối đa `OCR_MESSAGE_BUDGET_SECONDS` (30 giây). Ảnh chưa đọc xong khi hết giờ chuyển thành `failed`; user gửi lại ảnh đó để đọc lại.
 
 Nếu request có ảnh thất bại sau khi đã nhận ảnh (429 hết lượt, 403/422 ở ảnh sau, 503), các tài liệu đã nhận được đánh dấu `failed`. Gửi lại đúng ảnh đó thì được đọc lại.
 

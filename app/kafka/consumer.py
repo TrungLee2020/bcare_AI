@@ -314,9 +314,11 @@ async def _process_with_retry(record) -> None:
 
 
 # Chờ message đang xử lý dở xong trước khi tắt / trả partition. Phải lớn hơn
-# thời gian xử lý tối đa của 1 message (timeout OpenAI × số lần thử + backoff),
-# và nhỏ hơn terminationGracePeriodSeconds của k8s.
-SHUTDOWN_GRACE_SECONDS = 90.0
+# thời gian xử lý tối đa của 1 message, và nhỏ hơn stop_grace_period của
+# docker-compose (120s) / terminationGracePeriodSeconds của k8s. Tin có ảnh:
+# đọc ảnh ocr_message_budget_seconds (30) + trả lời có retry (25 × 3 + backoff
+# ≈ 78) ≤ 110 < 120 (tests/test_documents_timing.py).
+SHUTDOWN_GRACE_SECONDS = 110.0
 # Phải lớn hơn SHUTDOWN_GRACE_SECONDS, xem chỗ dùng trong `_consume_loop`.
 REBALANCE_TIMEOUT_MS = int((SHUTDOWN_GRACE_SECONDS + 30) * 1000)
 # Vòng đọc lỗi (Kafka chưa sẵn sàng lúc boot, mất kết nối...) thì thử lại sau

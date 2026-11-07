@@ -32,9 +32,10 @@ services:
       kafka-init:
         condition: service_completed_successfully
     restart: unless-stopped
-    # Lớn hơn --timeout-graceful-shutdown của uvicorn (Dockerfile) cộng
-    # SHUTDOWN_GRACE_SECONDS của consumer, để message đang dở kịp chạy xong
-    # và consumer kịp rời group trước khi bị SIGKILL.
+    # Lớn hơn SHUTDOWN_GRACE_SECONDS của consumer (110s), để message đang dở
+    # kịp chạy xong và consumer kịp rời group trước khi bị SIGKILL. Bất biến:
+    # đọc ảnh (30s) + trả lời có retry (~78s) ≈ 108s ≤ 110s < 120s; cộng
+    # --timeout-graceful-shutdown 10s của uvicorn (Dockerfile) vẫn ≤ 120s.
     stop_grace_period: 120s
 
   postgres:

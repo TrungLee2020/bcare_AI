@@ -194,6 +194,10 @@ class Settings(BaseSettings):
     # /v1/chat: chờ câu trả lời tối đa ngần này giây trong cùng request. Phải
     # lớn hơn thời gian xử lý tối đa của consumer (timeout × số lần thử +
     # backoff), và nhỏ hơn proxy_read_timeout của nginx cho /v1/.
+    # Bất biến cho tin có ảnh (tests/test_documents_timing.py): đọc ảnh
+    # ocr_message_budget_seconds (30) + trả lời có retry (25 × 3 + backoff ≈ 78)
+    # ≤ SHUTDOWN_GRACE_SECONDS của consumer (110) < stop_grace_period (120),
+    # và ≤ v1_answer_timeout_seconds (120).
     v1_answer_timeout_seconds: float = 120.0
     # health_context dài hơn ngần này (JSON) thì cắt — chặn chi phí prompt.
     health_context_max_chars: int = 2000
@@ -277,9 +281,11 @@ class Settings(BaseSettings):
     ocr_max_image_bytes: int = 10 * 1024 * 1024
     # Ảnh đặt tạm trong Redis chờ consumer xử lý.
     ocr_image_ttl_seconds: int = 3600
-    ocr_llm_budget_seconds: float = 60.0
+    # Trần cho MỘT lần gọi model đọc ảnh; phải ≤ ocr_message_budget_seconds mới có tác dụng.
+    ocr_llm_budget_seconds: float = 25.0
     # Tổng thời gian đọc ảnh của MỘT tin (các ảnh đọc song song); quá thì ảnh chưa xong bị đánh failed.
-    ocr_message_budget_seconds: float = 45.0
+    # Xem bất biến thời gian ở v1_answer_timeout_seconds.
+    ocr_message_budget_seconds: float = 30.0
     # Chữ OCR của một phiếu xét nghiệm dài vượt trần chat (openai_max_output_tokens).
     ocr_max_output_tokens: int = 4000
     ocr_context_documents: int = 3
