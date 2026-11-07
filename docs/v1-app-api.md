@@ -122,6 +122,8 @@ Thiết kế đầy đủ: [docs/superpowers/specs/2026-11-06-chat-image-ocr-des
 
 App upload ảnh lên Supabase Storage (bucket `health-documents`, đường dẫn `<user_id>/<uuid>.jpg`) rồi gửi đường dẫn trong `POST /v1/chat`. Backend tải ảnh bằng token của user, phân loại, đọc chữ, trích xuất và lưu. Chỉ xử lý khi user đã đồng ý `ai_chat` **và** `ai_share_profile`. Tính năng bật bằng `OCR_ENABLED`.
 
+**Rollout:** chỉ bật `OCR_ENABLED` khi **mọi** instance đã chạy bản này. Consumer bản cũ không biết `document_ids`: tin chỉ có ảnh sẽ bị coi là câu hỏi rỗng.
+
 ### `attachments` trong `POST /v1/chat`
 
 ```json
@@ -161,7 +163,7 @@ Tài liệu chưa xoá của user, mới trước. `type`: `prescription`, `lab_
 }
 ```
 
-App tự lấy ảnh từ Storage bằng `storage_path`.
+App tự lấy ảnh từ Storage bằng `storage_path`. **Luôn lấy ảnh qua `documents[].id` → `storage_path`**, không dùng đường dẫn app vừa upload: gửi lại một ảnh đã có (trùng nội dung), service giữ bản cũ và **xoá object vừa upload**, nên `storage_path` của tài liệu là đường dẫn của lần upload đầu.
 
 ### `GET /v1/documents/{id}`
 
@@ -173,7 +175,13 @@ Như một mục ở trên, thêm `ocr_text`, `extraction` (bản trích xuất 
 
 ### `DELETE /v1/documents/{id}`
 
-Ẩn ngay và xoá ảnh trên Storage bằng token user, trả `204`. Bản ghi DB bị xoá hẳn sau `HISTORY_PURGE_AFTER_DAYS` ngày. Xoá hội thoại không xoá tài liệu.
+Ẩn ngay và xoá ảnh trên Storage bằng token user, trả `204`. Bản ghi DB bị xoá hẳn sau `HISTORY_PURGE_AFTER_DAYS` ngày. Xoá hội thoại không xoá tài liệu. Tài liệu không có, đã xoá, hoặc của tài khoản khác: `404 not_found`.
+
+### `DELETE /v1/documents`
+
+Xoá **toàn bộ** giấy tờ của tài khoản: ẩn mọi tài liệu ngay và xoá từng ảnh trên Storage bằng token user (xoá ảnh lỗi thì vẫn trả `204`, service ghi log). Luôn trả `204` (kể cả khi không có gì để xoá), nên gọi lại an toàn.
+
+**Xoá tài khoản:** app gọi `DELETE /v1/documents` **và** `DELETE /v1/conversations` **trước khi** xoá tài khoản Supabase (xoá tài khoản xong thì token không dùng được để xoá ảnh nữa). Gọi lỗi (`503`, mất mạng) thì chưa xoá tài khoản, cho user thử lại.
 
 ### Trạng thái (`status`)
 
@@ -181,8 +189,8 @@ Như một mục ở trên, thêm `ocr_text`, `extraction` (bản trích xuất 
 |---|---|---|
 | `received` | Đã nhận, chưa đọc | không |
 | `processing` | Đang đọc | không |
-| `done` | Đã đọc và trích xuất | có |
-| `skipped` | Không phải giấy tờ y tế, hoặc phim chụp (chỉ phân loại, lưu, không đọc) | không |
+| `done` | Đã đọc và trích xuất. Phim chụp (`imaging_film`) cũng là `done` nhưng chỉ phân loại và lưu, không đọc: `ocr_text` / `extraction` là `null` | chỉ khi bước OCR thực sự chạy (phim chụp: không) |
+| `skipped` | Không phải giấy tờ y tế, hoặc phân loại không đủ chắc chắn | không |
 | `unreadable` | Ảnh mờ / không đọc được, nên chụp lại | không |
 | `quota_exceeded` | Hết `OCR_MAX_PER_DAY` (3 ảnh/ngày) | không |
 | `failed` | Lỗi model, hết `OCR_MESSAGE_BUDGET_SECONDS`, hoặc request thất bại sau khi nhận ảnh; gửi lại để đọc lại | không (hoàn nếu đã trừ) |
@@ -202,8 +210,9 @@ Như một mục ở trên, thêm `ocr_text`, `extraction` (bản trích xuất 
 1. Tạo bucket riêng tư `health-documents`; policy: user chỉ đọc / ghi / xoá object dưới `{auth.uid()}/`.
 2. Trước khi upload, **re-encode mọi ảnh thành JPEG thuần**: chuyển HEIC sang JPEG, xoá EXIF, thu nhỏ cạnh dài tối đa 2048 px. JPEG chụp từ điện thoại mà Pillow nhận là "MPO" bị từ chối (`422 invalid_attachment`), nên không upload nguyên file camera.
 3. Gửi `attachments` (`path`, `profile_id`) trong `POST /v1/chat`; xử lý `documents` trong response / `done`.
-4. Màn hồ sơ: danh sách, chi tiết (dữ liệu trích xuất, đánh dấu `uncertain_fields`), xoá, hiển thị trạng thái (kể cả `failed` / `unreadable` với nút gửi lại).
+4. Màn hồ sơ: danh sách, chi tiết (dữ liệu trích xuất, đánh dấu `uncertain_fields`), xoá, hiển thị trạng thái (kể cả `failed` / `unreadable` với nút gửi lại). Hiển thị ảnh qua `documents[].id` → `storage_path`, không qua đường dẫn vừa upload.
 5. Nội dung popup chia sẻ hồ sơ nói rõ có lưu ảnh và dữ liệu giấy tờ y tế.
+6. Xoá tài khoản: gọi `DELETE /v1/documents` và `DELETE /v1/conversations` trước khi xoá tài khoản Supabase.
 
 ## Lịch sử chat
 
@@ -254,6 +263,7 @@ Tin nhắn của một hội thoại. Trang đầu là các tin **mới nhất**
 ```
 
 - `should_see_doctor`, `follow_up_questions` chỉ có ở tin `assistant`. Lượt lưu trước 2026-11-02 có `follow_up_questions: []`.
+- Tin `user` gửi kèm ảnh có thêm `documents`: danh sách id tài liệu (`["uuid", …]`); chi tiết lấy qua `GET /v1/documents/{id}`. Tin chỉ có ảnh có `content` rỗng.
 - Một trang có thể bắt đầu bằng tin `assistant` (câu hỏi của nó nằm ở trang trước).
 - Hội thoại không tồn tại, `conversation_id` không phải UUID, hoặc của tài khoản khác đều trả `404 not_found`.
 - Tiếp tục hội thoại: gửi `POST /v1/chat` với đúng `conversation_id` này. Chỉ gửi tối đa 48 message (`/v1/chat` trả `422` nếu nhiều hơn); service chỉ dùng câu hỏi cuối và tự nạp ngữ cảnh.
@@ -268,7 +278,7 @@ Hội thoại đã xoá không mở lại được: hỏi tiếp bằng `convers
 
 Xoá **toàn bộ** lịch sử của tài khoản. Luôn trả `204` (kể cả khi không có gì để xoá), nên gọi lại an toàn.
 
-**Xoá tài khoản:** app gọi API này **trước khi** xoá tài khoản Supabase (xoá tài khoản xong thì token không dùng được nữa). Gọi lỗi (`503`, mất mạng) thì chưa xoá tài khoản, cho user thử lại.
+**Xoá tài khoản:** app gọi API này **và** `DELETE /v1/documents` **trước khi** xoá tài khoản Supabase (xoá tài khoản xong thì token không dùng được nữa). Gọi lỗi (`503`, mất mạng) thì chưa xoá tài khoản, cho user thử lại.
 
 ## `POST /v1/report/monthly`
 
