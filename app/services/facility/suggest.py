@@ -10,6 +10,7 @@ Thứ tự ưu tiên của trạng thái: emergency → clarify → ok / empty.
 
 import asyncio
 import hashlib
+import re
 import logging
 from collections.abc import Awaitable, Callable
 
@@ -67,14 +68,26 @@ async def _free() -> None:
     return None
 
 
+# Luật giả định chuyên khoa chỉ có từ facility_v3; prompt cũ (production đang ghim
+# v1) không có luật nên không đưa bảng chuyên khoa và bỏ qua mọi giả định.
+GUESS_MIN_PROMPT_VERSION = 3
+
+
+def _prompt_version_number() -> int:
+    """"v3" -> 3; không đọc được -> 0."""
+    m = re.fullmatch(r"v(\d+)", settings.facility_prompt_version.strip().lower())
+    return int(m.group(1)) if m else 0
+
+
+def _guesses_enabled() -> bool:
+    return _prompt_version_number() >= GUESS_MIN_PROMPT_VERSION
+
+
 def _system_prompt() -> str:
-    return (
-        load_prompt("facility", settings.facility_prompt_version)
-        + "\n"
-        + tag_table()
-        + "\n\nDanh sách chuyên khoa (key: tên (triệu chứng điển hình)):\n"
-        + specialty_table()
-    )
+    prompt = load_prompt("facility", settings.facility_prompt_version) + "\n" + tag_table()
+    if _guesses_enabled():
+        prompt += "\n\nDanh sách chuyên khoa (key: tên (triệu chứng điển hình)):\n" + specialty_table()
+    return prompt
 
 
 def _cache_key(text: str) -> str:
@@ -210,7 +223,7 @@ async def suggest(
         group,
         after_trauma=found.after_trauma,
         mental_health=found.mental_health and not clarify_choice,
-        guesses=[] if general_only else found.guesses,
+        guesses=[] if general_only or not _guesses_enabled() else found.guesses,
     )
     if clarify_choice and not general_only:
         mapping.specialties.setdefault(clarify_choice, catalog.SpecialtyPick(clarify_choice, "primary", []))
@@ -225,7 +238,7 @@ async def suggest(
 
     if found.unmapped:
         metrics.incr("facility_unmapped")
-        guess_by_text = {text: key for text, key, _ in found.guesses}
+        guess_by_text = {text: key for text, key, _ in found.guesses} if _guesses_enabled() else {}
         for phrase in found.unmapped:
             guess = guess_by_text.get(phrase, "none")
             metrics.incr(f"facility_guess_{guess}")

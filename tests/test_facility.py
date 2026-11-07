@@ -15,6 +15,7 @@ from app.config import settings
 from app.redis_client import set_redis
 from app.services import openai_client
 from app.services.facility import catalog, facilities, ranking
+from app.services.facility import suggest as suggest_module
 from app.services.facility.facilities import Facility, clean
 from app.services.facility.interpret import SymptomInterpretation, emergency_from_keywords, verify
 from tests.test_v1_api import JWT_SECRET, SUPABASE_URL, auth
@@ -725,7 +726,8 @@ def test_schema_is_strict_and_guess_enum_excludes_mental_and_pediatric():
             enum_values = defs[sub["$ref"].split("/")[-1]]["enum"] if "$ref" in sub else sub["enum"]
     assert enum_values is not None
     assert "" in enum_values
-    assert "tam_than" not in enum_values and "nhi" not in enum_values
+    for banned in ("tam_than", "nhi", "ung_buou", "y_hoc_co_truyen"):
+        assert banned not in enum_values
     assert "mat" in enum_values
 
 
@@ -762,3 +764,25 @@ async def test_clarify_choice_beats_assumed_guess(client, supabase, llm):
     assert "Bụt tạm đoán" not in (data["interpretation"]["note"] or "")
     ids = [f["id"] for f in data["facilities"]]
     assert ids.index("neuro-1") < ids.index("gen-1")
+
+
+def test_verify_drops_guess_of_cancer_and_traditional_medicine():
+    raw = interp()
+    raw = SimpleNamespace(**{**raw.__dict__, "unmapped": [
+        SimpleNamespace(text="nổi cục lạ", specialty="ung_buou", reason="cục lạ"),
+        SimpleNamespace(text="mệt mỏi lâu", specialty="y_hoc_co_truyen", reason="mệt"),
+    ]})
+    assert verify(raw, "nổi cục lạ, mệt mỏi lâu").guesses == []
+
+
+@pytest.mark.asyncio
+async def test_guess_needs_facility_prompt_v3(client, supabase, llm, monkeypatch):
+    llm.result = interp(unmapped=[{"text": "nhìn đôi", "specialty": "mat", "reason": "nhìn một thành hai"}])
+    monkeypatch.setattr(settings, "facility_prompt_version", "v2")
+    data = (await suggest(client, text="mấy hôm nay nhìn đôi")).json()
+    assert not any(s["assumed"] for s in data["interpretation"]["specialties"])
+    assert "Danh sách chuyên khoa" not in suggest_module._system_prompt()
+    monkeypatch.setattr(settings, "facility_prompt_version", "v3")
+    data = (await suggest(client, text="mấy hôm nay nhìn đôi, thêm chút")).json()
+    assert any(s["assumed"] for s in data["interpretation"]["specialties"])
+    assert "Danh sách chuyên khoa" in suggest_module._system_prompt()

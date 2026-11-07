@@ -30,7 +30,10 @@ TRAUMA_SENSITIVE = frozenset({"joint_pain", "back_pain", "headache", "numbness"}
 TRAUMA_SPECIALTY = "ngoai_chan_thuong"
 MENTAL_SPECIALTY = "tam_than"
 # Không bao giờ được giả định: tâm thần đi qua cờ mental_health, tuổi do app xử lý.
-GUESS_EXCLUDED = frozenset({"tam_than", "nhi"})
+# Không bao giờ đoán: tam_than / nhi chỉ đi theo bảng hoặc cờ; "Ung bướu" đoán
+# sai làm người dùng hoảng (khối u đi qua thẻ "khối u" đã duyệt); y_hoc_co_truyen
+# là lựa chọn của người dùng, không phải chuyên khoa theo triệu chứng.
+GUESS_EXCLUDED = frozenset({"tam_than", "nhi", "ung_buou", "y_hoc_co_truyen"})
 
 
 def _load(name: str) -> dict:
