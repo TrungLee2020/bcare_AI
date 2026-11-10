@@ -34,12 +34,27 @@ class ChatRequestMessage(BaseModel):
     # lịch sử chat.
     health_context: str | None = None
 
+    # Ảnh giấy tờ đính kèm (health_documents.id), xem
+    # docs/superpowers/specs/2026-11-06-chat-image-ocr-design.md. Consumer xử
+    # lý chúng trước khi trả lời; `content` rỗng = tin chỉ có ảnh.
+    document_ids: list[UUID] = Field(default_factory=list)
+
 
 class V1Message(BaseModel):
     role: Literal["user", "assistant", "system"]
     # Trần rộng cho các lượt cũ (server không dùng chúng, xem app/api/v1.py);
     # lượt user cuối cùng bị kiểm chặt hơn ở endpoint.
     content: str = Field(max_length=8000)
+
+
+class V1Attachment(BaseModel):
+    """Ảnh app đã upload lên Supabase Storage (bucket health-documents)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    path: str = Field(min_length=1, max_length=300)
+    # Thành viên gia đình (app tự định nghĩa); None = chủ tài khoản.
+    profile_id: str | None = Field(default=None, max_length=64)
 
 
 class V1ChatRequest(BaseModel):
@@ -55,6 +70,8 @@ class V1ChatRequest(BaseModel):
     locale: str = Field(default="vi", max_length=16)
     client_safety: Literal["none", "crisis", "emergency"] = "none"
     health_context: dict | None = None
+    # Trần rộng; trần thật (OCR_MAX_ATTACHMENTS) kiểm ở endpoint để trả lỗi riêng.
+    attachments: list[V1Attachment] = Field(default_factory=list, max_length=10)
 
 
 class V1MonthlyReportRequest(BaseModel):

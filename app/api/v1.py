@@ -23,8 +23,10 @@ Lỗi luôn có dạng `{"error": <mã>, "message": <câu hiển thị được>
   401 unauthorized        — token hỏng/hết hạn: app đăng nhập lại.
   403 consent_required    — chưa đồng ý dùng Trợ lý AI: app hiện màn đồng ý.
   403 not_enabled         — tài khoản chưa nằm trong nhóm được mở (rollout).
+  403 forbidden           — ảnh đính kèm không thuộc tài khoản.
   404 not_found           — không có hội thoại này (hoặc của người khác).
   422 invalid_request     — body sai hợp đồng.
+  422 invalid_attachment  — ảnh không tìm thấy / không phải ảnh / quá lớn.
   429 quota_exceeded      — hết lượt hỏi trong ngày (kèm retry_after, limit).
   429 rate_limited        — gọi dồn dập / quá số lần tạo báo cáo trong ngày.
   503 unavailable         — lỗi phía service: app cho thử lại.
@@ -45,7 +47,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from app import metrics
 from app.auth import AuthError, AuthUnavailable, Principal, authenticate
 from app.config import settings
-from app.db import repository
+from app.db import documents_repository, repository
 from app.db.session import db_session
 from app.kafka.producer import publish_chat_request
 from app.redis_client import get_redis
@@ -57,9 +59,12 @@ from app.schemas import (
     V1FacilitySuggestRequest,
     V1MonthlyReportRequest,
 )
-from app.services import consent, cost, idempotency, openai_client, output_validator, quota, rollout, smalltalk
+from app.services import consent, cost, disclaimer, idempotency, openai_client, output_validator, quota, rollout, smalltalk
 from app.services.facility import facilities
 from app.services.facility import suggest as facility_suggest_service
+from app.services.documents import intake, pipeline as documents_pipeline
+from app.services.documents import replies as documents_replies
+from app.services.documents import storage as documents_storage
 from app.sse import hub
 
 logger = logging.getLogger(__name__)
@@ -253,22 +258,32 @@ async def _wait_for(queue: asyncio.Queue, request_id: UUID, user_id: str) -> Cha
     return None
 
 
-def _done_payload(answer: ChatAnswer, conversation_id: UUID, quota_remaining: int | None) -> dict:
-    return {
+def _display(text: str) -> str:
+    """Bỏ câu "chỉ tham khảo" của model khi app tự hiển thị; không bao giờ trả
+    rỗng (câu trả lời chỉ gồm câu đó thì giữ nguyên)."""
+    return disclaimer.for_display(text).strip() or text
+
+
+def _done_payload(answer: ChatAnswer, conversation_id: UUID, quota_remaining: int | None, documents: list[dict] | None = None) -> dict:
+    payload = {
         "type": "done",
         "conversation_id": str(conversation_id),
         "should_see_doctor": answer.should_see_doctor,
         "follow_up_questions": answer.follow_up_questions,
         "quota_remaining": quota_remaining,
+        "disclaimer": settings.chat_disclaimer,
     }
+    if documents:
+        payload["documents"] = documents
+    return payload
 
 
-async def _stream_answer(answer: ChatAnswer, conversation_id: UUID, quota_remaining: int | None):
-    for index, part in enumerate(_chunks(answer.answer)):
+async def _stream_answer(answer: ChatAnswer, conversation_id: UUID, quota_remaining: int | None, documents: list[dict] | None = None):
+    for index, part in enumerate(_chunks(_display(answer.answer))):
         if index:
             await asyncio.sleep(DELTA_INTERVAL_SECONDS)
         yield _sse({"type": "delta", "text": part})
-    yield _sse(_done_payload(answer, conversation_id, quota_remaining))
+    yield _sse(_done_payload(answer, conversation_id, quota_remaining, documents))
 
 
 _UNAVAILABLE_EVENT = {
@@ -284,24 +299,103 @@ _SSE_HEADERS = {
 }
 
 
-def _respond_now(request: Request, answer: ChatAnswer, conversation_id: UUID, quota_remaining: int | None):
+def _respond_now(request: Request, answer: ChatAnswer, conversation_id: UUID, quota_remaining: int | None, documents: list[dict] | None = None):
     if _wants_sse(request):
         return StreamingResponse(
-            _stream_answer(answer, conversation_id, quota_remaining),
+            _stream_answer(answer, conversation_id, quota_remaining, documents),
             media_type="text/event-stream",
             headers=_SSE_HEADERS,
         )
-    return JSONResponse(_json_body(answer, conversation_id, quota_remaining))
+    return JSONResponse(_json_body(answer, conversation_id, quota_remaining, documents))
 
 
-def _json_body(answer: ChatAnswer, conversation_id: UUID, quota_remaining: int | None) -> dict:
-    return {
-        "reply": answer.answer,
+def _json_body(answer: ChatAnswer, conversation_id: UUID, quota_remaining: int | None, documents: list[dict] | None = None) -> dict:
+    body = {
+        "reply": _display(answer.answer),
         "conversation_id": str(conversation_id),
         "should_see_doctor": answer.should_see_doctor,
         "follow_up_questions": answer.follow_up_questions,
         "quota_remaining": quota_remaining,
+        "disclaimer": settings.chat_disclaimer,
     }
+    if documents:
+        body["documents"] = documents
+    return body
+
+
+def _check_attachments(payload: V1ChatRequest, principal: Principal, granted: consent.Consent) -> None:
+    """Các kiểm tra không ghi gì: bật tính năng, số ảnh, đồng ý, quyền sở hữu."""
+    if not settings.ocr_enabled:
+        raise V1Error(403, "not_enabled", "Tính năng gửi ảnh giấy tờ chưa được mở.")
+    if len(payload.attachments) > settings.ocr_max_attachments:
+        raise V1Error(
+            422, "invalid_request", f"Mỗi tin nhắn gửi tối đa {settings.ocr_max_attachments} ảnh.",
+            max_attachments=settings.ocr_max_attachments,
+        )
+    if not granted.share_profile:
+        metrics.incr("v1_documents_consent_required")
+        raise V1Error(
+            403, "consent_required", "Bạn cần đồng ý chia sẻ hồ sơ sức khoẻ để Bụt đọc và lưu giấy tờ.",
+            consent="share_profile",
+        )
+    # Kiểm quyền sở hữu mọi đường dẫn TRƯỚC khi nhận ảnh nào, để ảnh đầu không
+    # bị ghi lại khi ảnh sau bị từ chối 403.
+    for attachment in payload.attachments:
+        if not documents_storage.is_owned(attachment.path, principal.user_id):
+            metrics.incr("v1_documents_rejected_forbidden")
+            raise V1Error(403, "forbidden", "Ảnh không thuộc tài khoản của bạn.")
+
+
+async def _accept_attachments(payload: V1ChatRequest, principal: Principal, granted: consent.Consent, request: Request, conversation_id: UUID, accepted_ids: list[UUID]) -> list[dict]:
+    """`accepted_ids` được điền dần: nếu một ảnh sau bị từ chối, nơi gọi biết ảnh nào đã ghi."""
+    _check_attachments(payload, principal, granted)
+    documents: dict[str, dict] = {}
+    for attachment in payload.attachments:
+        try:
+            accepted = await intake.accept(
+                get_redis(),
+                user_id=principal.user_id,
+                access_token=_bearer(request),
+                conversation_id=conversation_id,
+                path=attachment.path,
+                profile_id=attachment.profile_id,
+            )
+        except intake.AttachmentRejected as exc:
+            metrics.incr(f"v1_documents_rejected_{exc.code}")
+            raise V1Error(exc.status_code, exc.code, exc.message) from exc
+        except Exception as exc:
+            logger.exception("Nhận ảnh thất bại user_id=%s", principal.user_id)
+            raise V1Error(503, "unavailable", "Hệ thống đang bận, vui lòng thử lại sau ít phút.") from exc
+        accepted_ids.append(accepted.document_id)
+        documents[str(accepted.document_id)] = {"id": str(accepted.document_id), "status": accepted.status}
+    metrics.incr("v1_documents_accepted", len(documents))
+    return list(documents.values())
+
+
+async def _documents_only(request: Request, principal: Principal, request_id: UUID, conversation_id: UUID, documents: list[dict]):
+    """Tin chỉ có ảnh: trả ngay câu "đã nhận", không gọi model chat, không trừ
+    lượt chat. Consumer xử lý ảnh và ghi lượt vào lịch sử."""
+    redis = get_redis()
+    if await idempotency.claim(redis, request_id):
+        try:
+            await publish_chat_request(
+                ChatRequestMessage(
+                    request_id=request_id,
+                    user_id=principal.user_id,
+                    session_id=conversation_id,
+                    tier=principal.tier,
+                    content="",
+                    document_ids=[UUID(d["id"]) for d in documents],
+                )
+            )
+        except Exception as exc:
+            await idempotency.release(redis, request_id)
+            await documents_pipeline.fail_unfinished([UUID(d["id"]) for d in documents], "request_failed")
+            metrics.incr("v1_enqueue_failed")
+            logger.exception("Enqueue ảnh thất bại request_id=%s", request_id)
+            raise V1Error(503, "unavailable", "Hệ thống đang bận, vui lòng thử lại sau ít phút.") from exc
+    remaining = await quota.remaining(redis, principal.user_id, principal.tier)
+    return _respond_now(request, documents_replies.received_answer(len(documents)), conversation_id, remaining, documents)
 
 
 @router.post("/chat")
@@ -312,7 +406,7 @@ async def chat(payload: V1ChatRequest, request: Request):
 
     last = payload.messages[-1]
     question = last.content.strip()
-    if last.role != "user" or not question:
+    if last.role != "user" or (not question and not payload.attachments):
         raise V1Error(422, "invalid_request", "Tin nhắn cuối cùng phải là câu hỏi của người dùng.")
     if len(question) > QUESTION_MAX_CHARS:
         raise V1Error(
@@ -335,13 +429,38 @@ async def chat(payload: V1ChatRequest, request: Request):
         return _respond_now(request, answer, conversation_id, None)
 
     redis = get_redis()
-    if smalltalk.is_greeting(question):
+    request_id = _request_id(principal.user_id, request)
+    documents: list[dict] = []
+    accepted_ids: list[UUID] = []
+    if payload.attachments:
+        if await idempotency.is_claimed(redis, request_id):
+            # Thử lại cùng Idempotency-Key sau khi lần đầu đã vào pipeline: KHÔNG
+            # nhận lại ảnh. Nhận lại sẽ `reopen` ảnh đã failed/unreadable về
+            # "received" rồi không publish gì (request trùng), ảnh treo mãi.
+            # Trả đúng danh sách ảnh lần đầu đã ghi (lưu trước khi claim, nên
+            # đã claim là đã có); phần sau đi đường request trùng như cũ.
+            # Hai request trùng gửi song song có thể cùng lọt kiểm tra này và
+            # cùng nhận ảnh như trước đây: vô hại, ảnh vẫn ở "received" và
+            # đúng một request publish.
+            _check_attachments(payload, principal, granted)
+            metrics.incr("v1_documents_duplicate_request")
+            documents = await idempotency.get_documents(redis, request_id) or []
+        else:
+            try:
+                documents = await _accept_attachments(payload, principal, granted, request, conversation_id, accepted_ids)
+                await idempotency.save_documents(redis, request_id, documents)
+            except Exception:
+                await documents_pipeline.fail_unfinished(accepted_ids, "request_failed")
+                raise
+        if not question:
+            return await _documents_only(request, principal, request_id, conversation_id, documents)
+
+    if not documents and smalltalk.is_greeting(question):
         # Câu chào: trả lời cố định, không gọi model, không tính lượt.
         metrics.incr("v1_greeting")
         remaining = await quota.remaining(redis, principal.user_id, principal.tier)
         return _respond_now(request, smalltalk.GREETING_ANSWER, conversation_id, remaining)
 
-    request_id = _request_id(principal.user_id, request)
     # Nghe TRƯỚC khi publish: câu bị chặn ở lớp lọc input trả về trong vài ms,
     # đăng ký sau là lỡ mất.
     queue = hub.subscribe(principal.user_id)
@@ -349,14 +468,18 @@ async def chat(payload: V1ChatRequest, request: Request):
         quota_remaining = await _enqueue(
             redis, principal, request_id, conversation_id, question,
             render_health_context(payload.health_context) if granted.share_profile else None,
+            [UUID(d["id"]) for d in documents],
         )
-    except BaseException:
+    except BaseException as exc:
         hub.unsubscribe(principal.user_id, queue)
+        if isinstance(exc, Exception):
+            # Chưa tới Kafka (hết lượt / publish lỗi): đừng để ảnh treo ở "received".
+            await documents_pipeline.fail_unfinished(accepted_ids, "request_failed")
         raise
 
     if _wants_sse(request):
         return StreamingResponse(
-            _stream_pipeline(request, queue, principal.user_id, request_id, conversation_id, quota_remaining),
+            _stream_pipeline(request, queue, principal.user_id, request_id, conversation_id, quota_remaining, documents),
             media_type="text/event-stream",
             headers=_SSE_HEADERS,
         )
@@ -367,10 +490,10 @@ async def chat(payload: V1ChatRequest, request: Request):
     if response is None or response.status == "error":
         metrics.incr("v1_chat_unavailable")
         raise V1Error(503, "unavailable", _UNAVAILABLE_EVENT["message"])
-    return JSONResponse(_json_body(response.answer, conversation_id, quota_remaining))
+    return JSONResponse(_json_body(response.answer, conversation_id, quota_remaining, documents))
 
 
-async def _enqueue(redis, principal, request_id, conversation_id, question, health_context) -> int | None:
+async def _enqueue(redis, principal, request_id, conversation_id, question, health_context, document_ids: list[UUID] | None = None) -> int | None:
     """Idempotency -> quota -> Kafka, cùng thứ tự với /chat/ask. Trả về số lượt
     còn lại. Request trùng (thử lại cùng Idempotency-Key) không trừ thêm lượt
     và không publish lại — chỉ chờ câu trả lời của lần đầu."""
@@ -400,6 +523,7 @@ async def _enqueue(redis, principal, request_id, conversation_id, question, heal
                 content=question,
                 question_no=charged.question_no,
                 health_context=health_context,
+                document_ids=document_ids or [],
             )
         )
     except Exception as exc:
@@ -412,7 +536,7 @@ async def _enqueue(redis, principal, request_id, conversation_id, question, heal
     return charged.remaining
 
 
-async def _stream_pipeline(request, queue, user_id, request_id, conversation_id, quota_remaining):
+async def _stream_pipeline(request, queue, user_id, request_id, conversation_id, quota_remaining, documents=None):
     try:
         # Byte đầu tiên đi ngay để proxy/app biết kết nối đã thông.
         yield ": ok\n\n"
@@ -435,7 +559,7 @@ async def _stream_pipeline(request, queue, user_id, request_id, conversation_id,
             metrics.incr("v1_chat_unavailable")
             yield _sse(_UNAVAILABLE_EVENT)
             return
-        async for frame in _stream_answer(response.answer, conversation_id, quota_remaining):
+        async for frame in _stream_answer(response.answer, conversation_id, quota_remaining, documents):
             yield frame
     finally:
         hub.unsubscribe(user_id, queue)
@@ -594,9 +718,13 @@ def _message_body(message) -> dict:
         "created_at": _iso(message.created_at),
     }
     if message.role == "assistant":
+        body["content"] = _display(message.content)
+        body["disclaimer"] = settings.chat_disclaimer
         body["should_see_doctor"] = bool(message.meta.get("should_see_doctor", False))
         # Lượt ghi trước khi lưu gợi ý vào meta thì không có.
         body["follow_up_questions"] = message.meta.get("follow_up_questions", [])
+    if message.role == "user" and message.meta.get("documents"):
+        body["documents"] = message.meta["documents"]
     return body
 
 
@@ -618,7 +746,7 @@ async def conversations(request: Request):
         "conversations": [
             {
                 "conversation_id": str(row.session_id),
-                "title": _clip(row.first.content, TITLE_CHARS),
+                "title": _clip(row.first.content or "Ảnh giấy tờ", TITLE_CHARS),
                 "preview": _clip(row.last.content, PREVIEW_CHARS),
                 "message_count": row.message_count,
                 "created_at": _iso(row.first.created_at),
@@ -697,4 +825,140 @@ async def delete_conversation(conversation_id: str, request: Request):
         raise V1Error(503, "unavailable", _DELETE_UNAVAILABLE) from exc
     if not deleted:
         raise not_found
+    return Response(status_code=204)
+
+
+DOCUMENTS_PAGE = (20, 50)
+_DOCUMENT_TYPES = frozenset(
+    {"prescription", "lab_result", "medical_record", "imaging_report", "imaging_film", "other_medical", "not_medical"}
+)
+_DOCUMENTS_UNAVAILABLE = "Chưa tải được hồ sơ giấy tờ, bạn thử lại sau nhé."
+
+
+def _document_body(doc) -> dict:
+    return {
+        "id": str(doc.id),
+        "doc_type": doc.doc_type,
+        "title": doc.title,
+        "doc_date": doc.doc_date.isoformat() if doc.doc_date else None,
+        "status": doc.status,
+        "storage_path": doc.storage_path,
+        "profile_id": doc.profile_id,
+        "created_at": _iso(doc.created_at),
+    }
+
+
+def _document_id(raw: str) -> UUID:
+    try:
+        return UUID(raw)
+    except ValueError:
+        raise V1Error(404, "not_found", "Không tìm thấy giấy tờ này.") from None
+
+
+@router.get("/documents")
+async def documents(request: Request):
+    """Hồ sơ giấy tờ của user, mới trước. `cursor` = `created_at` (ISO) của
+    mục cuối trang trước; app URL-encode giá trị này."""
+    principal = await _principal(request)
+    metrics.incr("v1_documents_list")
+    raw_limit = request.query_params.get("limit", "")
+    if raw_limit and not re.fullmatch(r"[0-9]{1,3}", raw_limit):
+        raise V1Error(422, "invalid_request", "Tham số phân trang không hợp lệ.")
+    default, maximum = DOCUMENTS_PAGE
+    limit = min(max(int(raw_limit), 1), maximum) if raw_limit else default
+    before = None
+    raw_cursor = request.query_params.get("cursor", "")
+    if raw_cursor:
+        try:
+            before = datetime.fromisoformat(raw_cursor)
+        except ValueError:
+            raise V1Error(422, "invalid_request", "Tham số phân trang không hợp lệ.") from None
+        if before.tzinfo is None:
+            # Cursor do API trả luôn có múi giờ; thiếu thì coi là UTC (so với cột timestamptz).
+            before = before.replace(tzinfo=timezone.utc)
+    doc_type = request.query_params.get("type") or None
+    if doc_type is not None and doc_type not in _DOCUMENT_TYPES:
+        raise V1Error(422, "invalid_request", "Loại giấy tờ không hợp lệ.")
+    try:
+        async with db_session() as db:
+            rows = await documents_repository.list_documents(db, principal.user_id, limit + 1, before, doc_type)
+    except Exception as exc:
+        logger.exception("Đọc hồ sơ giấy tờ thất bại user_id=%s", principal.user_id)
+        raise V1Error(503, "unavailable", _DOCUMENTS_UNAVAILABLE) from exc
+    page = rows[:limit]
+    return {
+        "documents": [_document_body(d) for d in page],
+        "next_cursor": _iso(page[-1].created_at) if len(rows) > limit else None,
+    }
+
+
+@router.get("/documents/{document_id}")
+async def document_detail(document_id: str, request: Request):
+    principal = await _principal(request)
+    metrics.incr("v1_documents_detail")
+    doc_id = _document_id(document_id)
+    try:
+        async with db_session() as db:
+            doc = await documents_repository.get_document(db, doc_id, principal.user_id)
+            ocr = await documents_repository.get_ocr(db, doc_id) if doc else None
+            extraction = await documents_repository.latest_extraction(db, doc_id) if doc else None
+    except Exception as exc:
+        logger.exception("Đọc giấy tờ thất bại user_id=%s", principal.user_id)
+        raise V1Error(503, "unavailable", _DOCUMENTS_UNAVAILABLE) from exc
+    if doc is None:
+        raise V1Error(404, "not_found", "Không tìm thấy giấy tờ này.")
+    data = dict(extraction.data) if extraction else None
+    body = _document_body(doc)
+    body["ocr_text"] = ocr.text if ocr else None
+    body["extraction"] = data
+    body["uncertain_fields"] = (data or {}).get("uncertain_fields", [])
+    return body
+
+
+@router.delete("/documents/{document_id}")
+async def delete_document(document_id: str, request: Request):
+    """Ẩn ngay, xoá ảnh trên Storage ngay (đang có token user); bản ghi DB bị
+    job dọn dẹp xoá hẳn sau HISTORY_PURGE_AFTER_DAYS ngày."""
+    principal = await _principal(request)
+    metrics.incr("v1_documents_delete")
+    doc_id = _document_id(document_id)
+    try:
+        async with db_session() as db:
+            doc = await documents_repository.soft_delete_document(db, doc_id, principal.user_id)
+    except Exception as exc:
+        logger.exception("Xoá giấy tờ thất bại user_id=%s", principal.user_id)
+        raise V1Error(503, "unavailable", "Chưa xoá được giấy tờ, bạn thử lại sau nhé.") from exc
+    if doc is None:
+        raise V1Error(404, "not_found", "Không tìm thấy giấy tờ này.")
+    try:
+        await documents_storage.delete(doc.storage_path, _bearer(request))
+    except documents_storage.StorageError:
+        metrics.incr("documents_storage_delete_failed")
+        logger.warning("Chưa xoá được ảnh trên Storage document_id=%s", doc_id)
+    return Response(status_code=204)
+
+
+@router.delete("/documents")
+async def delete_all_documents(request: Request):
+    """Xoá mọi giấy tờ của user. App gọi cùng DELETE /v1/conversations TRƯỚC
+    khi xoá tài khoản Supabase: xoá tài khoản xong thì token không còn dùng
+    được để xoá ảnh trên Storage nữa."""
+    principal = await _principal(request)
+    metrics.incr("v1_documents_delete_all")
+    try:
+        async with db_session() as db:
+            deleted = await documents_repository.soft_delete_all_documents(db, principal.user_id)
+    except Exception as exc:
+        logger.exception("Xoá toàn bộ giấy tờ thất bại user_id=%s", principal.user_id)
+        raise V1Error(503, "unavailable", "Chưa xoá được giấy tờ, bạn thử lại sau nhé.") from exc
+    token = _bearer(request)
+    failed = 0
+    for doc in deleted:
+        try:
+            await documents_storage.delete(doc.storage_path, token)
+        except documents_storage.StorageError:
+            failed += 1
+            metrics.incr("documents_storage_delete_failed")
+            logger.warning("Chưa xoá được ảnh trên Storage document_id=%s", doc.id)
+    logger.info("Xoá toàn bộ giấy tờ user_id=%s documents=%d storage_failed=%d", principal.user_id, len(deleted), failed)
     return Response(status_code=204)

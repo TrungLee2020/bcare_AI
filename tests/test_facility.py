@@ -1,6 +1,7 @@
 """Gợi ý cơ sở khám theo triệu chứng (KAN-115)."""
 
 import json
+import logging
 from types import SimpleNamespace
 
 import httpx
@@ -14,6 +15,7 @@ from app.config import settings
 from app.redis_client import set_redis
 from app.services import openai_client
 from app.services.facility import catalog, facilities, ranking
+from app.services.facility import suggest as suggest_module
 from app.services.facility.facilities import Facility, clean
 from app.services.facility.interpret import SymptomInterpretation, emergency_from_keywords, verify
 from tests.test_v1_api import JWT_SECRET, SUPABASE_URL, auth
@@ -226,17 +228,21 @@ def interp(**overrides):
     base = dict(symptoms=[], unmapped=[], after_trauma=False, mental_health=False,
                 ambiguous_neuro=False, emergency="")
     base.update(overrides)
+    # Chuỗi thì đổi thành mục không có giả định chuyên khoa.
+    base["unmapped"] = [
+        {"text": u, "specialty": "", "reason": ""} if isinstance(u, str) else u for u in base["unmapped"]
+    ]
     return SymptomInterpretation.model_validate(base)
 
 
 def test_verify_drops_symptoms_without_grounding():
     raw = interp(
         symptoms=[{"key": "headache", "matched_text": "nhức đầu"}, {"key": "fever", "matched_text": "sốt cao"}],
-        unmapped=["đau răng", "bịa thêm"],
+        unmapped=["đau gót chân", "bịa thêm"],
     )
-    result = verify(raw, "Nhuc dau va dau rang")
+    result = verify(raw, "Nhuc dau va dau got chan")
     assert result.symptoms == [("headache", "nhức đầu")]
-    assert result.unmapped == ["đau răng"]
+    assert result.unmapped == ["đau gót chân"]
 
 
 # --- API ----------------------------------------------------------------------
@@ -333,7 +339,8 @@ async def test_api_tags_only_does_not_call_llm(client, supabase, llm):
     assert data["status"] == "ok"
     assert [f["id"] for f in data["facilities"]] == ["neuro-1", "gen-1"]
     assert data["interpretation"]["specialties"] == [
-        {"key": "than_kinh", "label": "Nội thần kinh", "role": "primary", "from": ["headache", "dizziness"]}
+        {"key": "than_kinh", "label": "Nội thần kinh", "role": "primary", "from": ["headache", "dizziness"],
+         "assumed": False, "reason": ""}
     ]
     assert data["data_version"] == "2026-10-27T00:00:00Z"
     assert llm.calls == []
@@ -388,10 +395,10 @@ async def test_api_ambiguous_neuro_asks_then_uses_choice(client, supabase, llm):
 
 @pytest.mark.asyncio
 async def test_api_unmapped_text_gives_general_with_note(client, supabase, llm):
-    llm.result = interp(unmapped=["đau răng"])
-    data = (await suggest(client, text="đau răng quá")).json()
+    llm.result = interp(unmapped=["đau gót chân"])
+    data = (await suggest(client, text="đau gót chân quá")).json()
     assert data["status"] == "ok"
-    assert data["interpretation"]["unmapped_text"] == ["đau răng"]
+    assert data["interpretation"]["unmapped_text"] == ["đau gót chân"]
     assert "đa khoa" in data["interpretation"]["note"]
     assert {f["match"] for f in data["facilities"]} == {"general"}
 
@@ -516,3 +523,266 @@ async def test_api_locale_en_accepted_answers_in_vietnamese(client, supabase, ll
     resp = await suggest(client, symptom_tags=["headache"], locale="en")
     assert resp.status_code == 200
     assert resp.json()["interpretation"]["specialties"][0]["label"] == "Nội thần kinh"
+
+
+# --- Triệu chứng bổ sung + đối chiếu nguyên chữ (KAN-115, 2026-11-06) ----------
+
+def test_extra_symptoms_use_known_keys_and_do_not_clash_with_app_tags():
+    known = set(catalog.specialties()) | {catalog.GENERAL}
+    assert not set(catalog.extra_symptoms()) & set(catalog.symptom_tags())
+    for item in catalog.extra_symptoms().values():
+        for group in ("adult", "child"):
+            entry = item["map"][group]
+            assert entry["primary"], item["key"]
+            assert set(entry["primary"]) | set(entry["secondary"]) <= known, item["key"]
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("dau da day", [("abdominal_pain", "dau da day")]),
+        ("đau đầu gối khi leo cầu thang", [("joint_pain", "đau đầu gối")]),
+        ("sổ mũi, rát họng", [("stuffy_nose", "sổ mũi"), ("sore_throat", "rát họng")]),
+        ("Trầm cảm", [("mental", "Trầm cảm")]),
+        ("đau răng mấy hôm", [("toothache", "đau răng")]),
+        ("không sốt nhưng ho", [("cough", "ho")]),
+        ("không sốt ho", []),
+        ("hết ho rồi, giờ đau họng", [("sore_throat", "đau họng")]),
+        # cụm một từ phải khớp cả dấu; câu không dấu thì để model đọc
+        ("họ bảo tôi bị ho", [("cough", "ho")]),
+        ("ho bao toi bi sot", []),
+        ("mẹ ơi", []),
+    ],
+)
+def test_literal_matches(text, expected):
+    assert catalog.literal_matches(text) == expected
+
+
+def test_extra_symptoms_map_to_their_specialty():
+    assert list(catalog.map_symptoms(["toothache"], "adult").specialties) == ["rang_ham_mat"]
+    assert list(catalog.map_symptoms(["menstrual"], "adult").specialties) == ["san"]
+    injury = catalog.map_symptoms(["injury"], "adult").specialties
+    assert injury["ngoai_chan_thuong"].role == "primary"
+    assert injury["co_xuong_khop"].role == "secondary"
+
+
+def test_verify_phrase_handled_by_mental_flag_is_not_unmapped():
+    """Log production 2026-11-05: 'Trầm cảm' bị log facility_unmapped dù đã gợi
+    ý đúng Tâm thần, và app hiện ghi chú 'chưa có trong bảng'."""
+    raw = interp(mental_health=True, unmapped=["Trầm cảm"])
+    result = verify(raw, "Trầm cảm")
+    assert result.unmapped == []
+    assert result.symptoms == [("mental", "Trầm cảm")]
+
+
+def test_verify_synonym_put_in_unmapped_becomes_symptom():
+    raw = interp(symptoms=[{"key": "sore_throat", "matched_text": "rát họng"}], unmapped=["sổ mũi"])
+    result = verify(raw, "sổ mũi, rát họng")
+    assert result.symptoms == [("sore_throat", "rát họng"), ("stuffy_nose", "sổ mũi")]
+    assert result.unmapped == []
+
+
+def test_verify_table_beats_model_when_grounding_is_a_listed_phrase():
+    raw = interp(symptoms=[{"key": "headache", "matched_text": "dau da day"}])
+    assert verify(raw, "dau da day").symptoms == [("abdominal_pain", "dau da day")]
+
+
+def test_verify_keeps_model_key_when_grounding_is_a_paraphrase():
+    raw = interp(symptoms=[{"key": "headache", "matched_text": "đầu như búa bổ"}])
+    assert verify(raw, "đầu như búa bổ").symptoms == [("headache", "đầu như búa bổ")]
+
+
+def test_verify_ambiguous_neuro_phrase_is_not_unmapped():
+    raw = interp(ambiguous_neuro=True, unmapped=["khám thần kinh"])
+    assert verify(raw, "tôi muốn khám thần kinh").unmapped == []
+
+
+@pytest.mark.asyncio
+async def test_api_mental_phrase_has_no_unmapped_note(client, supabase, llm):
+    llm.result = interp(mental_health=True, unmapped=["Trầm cảm"])
+    data = (await suggest(client, text="Trầm cảm")).json()
+    assert data["interpretation"]["unmapped_text"] == []
+    assert data["interpretation"]["note"] is None
+    assert [s["key"] for s in data["interpretation"]["specialties"]] == ["tam_than"]
+    names = [s["name"] for s in data["interpretation"]["symptoms"]]
+    assert names == ["Vấn đề tâm lý"]
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # bỏ dấu thì trùng nhau: câu có dấu khớp đúng, câu không dấu để model đọc
+        ("hết đau bụng rồi, giờ bị tiêu chảy", [("diarrhea", "tiêu chảy")]),
+        ("khó tiêu", [("bloating", "khó tiêu")]),
+        ("khó tiểu", [("urinary", "khó tiểu")]),
+        ("kho tieu", []),
+        ("đỏ mắt", [("eye_pain", "đỏ mắt")]),
+        ("do mat", []),
+    ],
+)
+def test_literal_matches_accent_collisions(text, expected):
+    assert catalog.literal_matches(text) == expected
+
+
+# --- Giả định chuyên khoa cho cụm ngoài bảng (KAN-134) -----------------------
+
+def _walk(schema: dict, defs: dict):
+    if "$ref" in schema:
+        yield from _walk(defs[schema["$ref"].split("/")[-1]], defs)
+        return
+    if schema.get("type") == "object":
+        yield schema
+        for sub in schema.get("properties", {}).values():
+            yield from _walk(sub, defs)
+    for key in ("anyOf", "allOf"):
+        for sub in schema.get(key, []):
+            yield from _walk(sub, defs)
+    if "items" in schema:
+        yield from _walk(schema["items"], defs)
+
+
+def test_verify_keeps_allowed_guess_and_drops_excluded():
+    # Enum của schema đã loại tam_than / nhi nên model không trả được; dựng đối tượng thô
+    # để kiểm lớp phòng thủ thứ hai trong verify().
+    raw = interp()
+    raw = SimpleNamespace(**{**raw.__dict__, "unmapped": [
+        SimpleNamespace(text="đau gót chân", specialty="co_xuong_khop", reason="đau gót chân khi đi"),
+        SimpleNamespace(text="hay lo lắng", specialty="tam_than", reason="lo âu"),
+        SimpleNamespace(text="bé hay quấy", specialty="nhi", reason="trẻ quấy"),
+    ]})
+    result = verify(raw, "đau gót chân, hay lo lắng, bé hay quấy")
+    assert result.guesses == [("đau gót chân", "co_xuong_khop", "đau gót chân khi đi")]
+    assert result.unmapped == ["đau gót chân", "hay lo lắng", "bé hay quấy"]
+
+
+def test_guess_reason_is_truncated():
+    raw = interp(unmapped=[{"text": "đau gót chân", "specialty": "co_xuong_khop", "reason": "x" * 200}])
+    assert len(verify(raw, "đau gót chân").guesses[0][2]) == 80
+
+
+def test_table_wins_over_guess():
+    mapping = catalog.map_symptoms(["joint_pain"], "adult", guesses=[("đau gót", "co_xuong_khop", "r")])
+    pick = mapping.specialties["co_xuong_khop"]
+    assert (pick.role, pick.assumed) == ("primary", False)
+
+
+def test_guess_becomes_assumed_secondary():
+    mapping = catalog.map_symptoms([], "adult", guesses=[("nhìn đôi", "mat", "nhìn một thành hai")])
+    pick = mapping.specialties["mat"]
+    assert (pick.role, pick.assumed, pick.reason, pick.sources) == ("secondary", True, "nhìn một thành hai", ["assumed"])
+
+
+def test_assumed_specialty_ranks_level_with_general():
+    general_far = row("g", "Đa khoa xa", is_general=True, lat=HOME[0] + 0.05)
+    eye_near = row("m", "BV Mắt", specialties=["mat"], lat=HOME[0] + 0.01)
+    general_near = row("g2", "Đa khoa gần", is_general=True, lat=HOME[0] + 0.001)
+    mapping = catalog.map_symptoms([], "adult", guesses=[("nhìn đôi", "mat", "nhìn một thành hai")])
+    ranked = ranking.rank(snapshot_of([general_far, eye_near, general_near]), mapping, "adult", *HOME, 50, 10)
+    assert [r.facility.id for r in ranked] == ["g2", "m", "g"]
+    eye = ranked[1]
+    assert eye.match == "secondary"
+    assert eye.reason.startswith("Bụt giả định: nhìn một thành hai → Mắt")
+
+
+@pytest.mark.asyncio
+async def test_api_assumed_specialty_is_labelled(client, supabase, llm):
+    llm.result = interp(unmapped=[{"text": "nhìn đôi", "specialty": "mat", "reason": "nhìn một thành hai"}])
+    data = (await suggest(client, text="mấy hôm nay nhìn đôi")).json()
+    [spec] = data["interpretation"]["specialties"]
+    assert spec == {"key": "mat", "label": "Mắt", "role": "secondary", "from": ["assumed"], "assumed": True,
+                    "reason": "nhìn một thành hai"}
+    assert "Bụt tạm đoán" in data["interpretation"]["note"]
+
+
+@pytest.mark.asyncio
+async def test_api_table_specialty_has_assumed_false(client, supabase, llm):
+    data = (await suggest(client, symptom_tags=["headache"], text=None)).json()
+    assert all(s["assumed"] is False for s in data["interpretation"]["specialties"])
+
+
+@pytest.mark.asyncio
+async def test_unmapped_log_includes_guess(client, supabase, llm, caplog):
+    llm.result = interp(unmapped=[
+        {"text": "nhìn đôi", "specialty": "mat", "reason": "nhìn một thành hai"},
+        {"text": "đau gót chân", "specialty": "", "reason": ""},
+    ])
+    caplog.set_level(logging.INFO)
+    await suggest(client, text="mấy hôm nay nhìn đôi, đau gót chân")
+    lines = [r.getMessage() for r in caplog.records if "facility_unmapped" in r.getMessage()]
+    assert any("guess=mat" in line and "nhìn đôi" in line for line in lines)
+    assert any("guess=none" in line and "đau gót chân" in line for line in lines)
+
+
+def test_schema_is_strict_and_guess_enum_excludes_mental_and_pediatric():
+    schema = SymptomInterpretation.model_json_schema()
+    defs = schema.get("$defs", {})
+    for obj in _walk(schema, defs):
+        assert obj.get("additionalProperties") is False
+        assert set(obj["required"]) == set(obj["properties"])
+    enum_values = None
+    for obj in _walk(schema, defs):
+        if "specialty" in obj.get("properties", {}):
+            sub = obj["properties"]["specialty"]
+            enum_values = defs[sub["$ref"].split("/")[-1]]["enum"] if "$ref" in sub else sub["enum"]
+    assert enum_values is not None
+    assert "" in enum_values
+    for banned in ("tam_than", "nhi", "ung_buou", "y_hoc_co_truyen"):
+        assert banned not in enum_values
+    assert "mat" in enum_values
+
+
+def test_guess_with_empty_reason_uses_phrase_text():
+    raw = interp(unmapped=[{"text": "nhìn đôi", "specialty": "mat", "reason": "  "}])
+    assert verify(raw, "nhìn đôi").guesses == [("nhìn đôi", "mat", "nhìn đôi")]
+
+
+def test_general_facility_with_assumed_specialty_not_worse_than_general():
+    both = row("b", "Đa khoa có mắt", specialties=["mat"], is_general=True, lat=HOME[0] + 0.02)
+    plain = row("p", "Đa khoa thường", is_general=True, lat=HOME[0] + 0.03)
+    mapping = catalog.map_symptoms([], "adult", guesses=[("nhìn đôi", "mat", "r")])
+    ranked = ranking.rank(snapshot_of([plain, both]), mapping, "adult", *HOME, 50, 10)
+    assert [r.facility.id for r in ranked] == ["b", "p"]
+    assert ranked[0].match == "secondary"
+
+
+def test_mixed_approved_and_assumed_hits():
+    fac = row("x", "BV đa chuyên khoa", specialties=["than_kinh", "mat"])
+    mapping = catalog.map_symptoms(["headache"], "adult", guesses=[("nhìn đôi", "mat", "nhìn một thành hai")])
+    [r] = ranking.rank(snapshot_of([fac]), mapping, "adult", *HOME, 50, 10)
+    assert r.match == "primary"
+    assert set(r.matched_specialties) == {"than_kinh", "mat"}
+    assert "Bụt giả định" in r.reason and "Đau đầu" in r.reason
+
+
+@pytest.mark.asyncio
+async def test_clarify_choice_beats_assumed_guess(client, supabase, llm):
+    llm.result = interp(unmapped=[{"text": "đau gót chân", "specialty": "than_kinh", "reason": "nghi dây thần kinh"}])
+    data = (await suggest(client, text="đau gót chân mấy hôm", clarify_choice="than_kinh")).json()
+    [spec] = data["interpretation"]["specialties"]
+    assert (spec["key"], spec["role"], spec["assumed"], spec["reason"]) == ("than_kinh", "primary", False, "")
+    assert "assumed" not in spec["from"]
+    assert "Bụt tạm đoán" not in (data["interpretation"]["note"] or "")
+    ids = [f["id"] for f in data["facilities"]]
+    assert ids.index("neuro-1") < ids.index("gen-1")
+
+
+def test_verify_drops_guess_of_cancer_and_traditional_medicine():
+    raw = interp()
+    raw = SimpleNamespace(**{**raw.__dict__, "unmapped": [
+        SimpleNamespace(text="nổi cục lạ", specialty="ung_buou", reason="cục lạ"),
+        SimpleNamespace(text="mệt mỏi lâu", specialty="y_hoc_co_truyen", reason="mệt"),
+    ]})
+    assert verify(raw, "nổi cục lạ, mệt mỏi lâu").guesses == []
+
+
+@pytest.mark.asyncio
+async def test_guess_needs_facility_prompt_v3(client, supabase, llm, monkeypatch):
+    llm.result = interp(unmapped=[{"text": "nhìn đôi", "specialty": "mat", "reason": "nhìn một thành hai"}])
+    monkeypatch.setattr(settings, "facility_prompt_version", "v2")
+    data = (await suggest(client, text="mấy hôm nay nhìn đôi")).json()
+    assert not any(s["assumed"] for s in data["interpretation"]["specialties"])
+    assert "Danh sách chuyên khoa" not in suggest_module._system_prompt()
+    monkeypatch.setattr(settings, "facility_prompt_version", "v3")
+    data = (await suggest(client, text="mấy hôm nay nhìn đôi, thêm chút")).json()
+    assert any(s["assumed"] for s in data["interpretation"]["specialties"])
+    assert "Danh sách chuyên khoa" in suggest_module._system_prompt()

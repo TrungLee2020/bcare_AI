@@ -127,3 +127,22 @@ async def remaining(redis: Redis, user_id: str, tier: str) -> int:
         return limit
     used = await redis.get(quota_key(user_id))
     return limit - int(used or 0)
+
+
+def daily_key(prefix: str, user_id: str, now: datetime | None = None) -> str:
+    now = now or _now()
+    return f"{prefix}:{user_id}:{now:%Y-%m-%d}"
+
+
+async def consume_daily(redis: Redis, prefix: str, user_id: str, limit: int) -> bool:
+    """Trừ 1 lượt của một bộ đếm theo ngày khác lượt chat (vd đọc ảnh). False =
+    hết lượt, không trừ gì. Cùng script Lua với quota chat nên không race."""
+    ok, _ = await redis.eval(
+        _CONSUME_LUA, 1, daily_key(prefix, user_id), _NO_LIMIT if is_unlimited(user_id) else limit,
+        seconds_until_midnight(),
+    )
+    return bool(int(ok))
+
+
+async def refund_daily(redis: Redis, prefix: str, user_id: str) -> None:
+    await redis.eval(_REFUND_LUA, 1, daily_key(prefix, user_id))

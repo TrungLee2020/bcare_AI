@@ -31,6 +31,7 @@ async def answer_question(
     message: ChatRequestMessage,
     context: ConversationContext | None = None,
     model: str | None = None,
+    document_context: str | None = None,
 ) -> ChatResponseMessage:
     """
     Sinh câu trả lời cho 1 request, có thể kèm ngữ cảnh hội thoại (Phase 4). Lỗi gọi OpenAI được ném lên cho consumer
@@ -87,8 +88,13 @@ async def answer_question(
         metrics.incr("health_context_dropped")
         health_context = None
 
+    if document_context and input_filter.check(document_context).blocked:
+        logger.warning("Bỏ document_context có dấu hiệu injection request_id=%s", message.request_id)
+        metrics.incr("document_context_dropped")
+        document_context = None
+
     generation = await openai_client.generate(
-        message.content, version, context, model, health_context
+        message.content, version, context, model, health_context, document_context
     )
     usage = cost.record(generation.usage, model)
 
@@ -101,6 +107,16 @@ async def answer_question(
         )
         metrics.incr("output_blocked")
         return _response(outcome.answer, "blocked", outcome.detail, usage)
+
+    outcome.answer = output_validator.with_emergency_lead(message.content, outcome.answer)
+
+    claims = output_validator.absolute_claims(outcome.answer.answer)
+    if claims:
+        metrics.incr("answer_absolute_claim")
+        for name in claims:
+            metrics.incr(f"answer_absolute_claim_{name}")
+        # Không log câu trả lời: chỉ tên mẫu, để biết prompt cần sửa ở đâu.
+        logger.info("Câu trả lời có cụm tuyệt đối request_id=%s patterns=%s", message.request_id, claims)
 
     return _response(outcome.answer, "ok", usage=usage)
 

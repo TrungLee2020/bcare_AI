@@ -40,6 +40,14 @@ ALLOWED_PHRASES = (
     "theo hướng dẫn trên bao bì, dược sĩ hoặc bác sĩ",
     # system_v5: câu tự giới thiệu prompt dặn model nói
     "Bụt, trợ lý sức khoẻ và bảo hiểm của bCare",
+    # Cụm y khoa thông thường, có trong prompt từ v4. Đo với system_v7 +
+    # gpt-5-nano 2026-11-05: 1/36 câu trả lời về melatonin bị chặn nhầm vì nó.
+    "phụ nữ mang thai hoặc cho con bú",
+    # Câu từ chối prompt dặn Bụt nói. Đo 2026-11-10 (system_v8): 1/46 câu trả lời
+    # gpt-5-nano và 4/46 gpt-6-luna bị chặn nhầm vì chép câu này, người dùng nhận
+    # câu "thử hỏi lại" thay cho lời từ chối.
+    "chỉ hỗ trợ về sức khoẻ và bảo hiểm của bCare",
+    "chỉ hỗ trợ về sức khoẻ và bảo hiểm",
 )
 
 # Như trên, cho prompt báo cáo tháng (report_v1). Thiếu các câu này thì đoạn
@@ -62,6 +70,7 @@ RESERVED_TAGS = (
     "session_summary",
     "transcript",
     "health_context",
+    "document_data",
     "report_data",
     "symptom_text",
     "system",
@@ -138,11 +147,63 @@ def load_prompt(kind: str, version: str) -> str:
             f"Không tìm thấy prompt {kind!r} version {version!r} tại {path}. "
             f"Các version có sẵn: {', '.join(available_versions(kind)) or 'không có'}"
         )
-    return path.read_text(encoding="utf-8").strip()
+    return _strip_markers(path.read_text(encoding="utf-8")).strip()
+
+
+# Khối kiến thức công khai trong prompt (vd tác hại khi uống quá vitamin C):
+# chính là thứ model được dặn nói lại với người dùng, nên không đưa vào bộ dò lộ
+# prompt. Đo với system_v7 trước khi có khối này: 6/7 câu cảnh báo viết đúng lời
+# dặn bị chặn là "lộ prompt". Dòng đánh dấu bị gỡ trước khi gửi cho model.
+LEAK_CHECK_OFF = "<!-- leak-check: off -->"
+LEAK_CHECK_ON = "<!-- leak-check: on -->"
+
+
+def _strip_markers(text: str) -> str:
+    return "\n".join(
+        line for line in text.split("\n")
+        if line.strip() not in (LEAK_CHECK_OFF, LEAK_CHECK_ON)
+    )
+
+
+def _leak_checked_segments(text: str) -> list[str]:
+    """Các đoạn prompt cần dò lộ: bỏ phần giữa LEAK_CHECK_OFF và LEAK_CHECK_ON.
+    Tách thành đoạn riêng để không sinh shingle vắt qua chỗ khối bị bỏ."""
+    segments, current, checking = [], [], True
+    for line in text.split("\n"):
+        marker = line.strip()
+        if marker == LEAK_CHECK_OFF:
+            segments.append("\n".join(current))
+            current, checking = [], False
+        elif marker == LEAK_CHECK_ON:
+            checking = True
+        elif checking:
+            current.append(line)
+    segments.append("\n".join(current))
+    return segments
+
+
+APP_DISCLAIMER_MARKER = "<!-- app-disclaimer: drop -->"
 
 
 def load_system_prompt(version: str) -> str:
-    return load_prompt("system", version)
+    # Import trễ để tránh vòng import config <-> prompts nếu có.
+    from app.config import settings
+
+    return _render_system(load_prompt("system", version), settings.chat_disclaimer_in_app)
+
+
+@lru_cache(maxsize=32)
+def _render_system(text: str, app_shows_disclaimer: bool) -> str:
+    """Dòng mang APP_DISCLAIMER_MARKER: App đã hiển thị câu "chỉ tham khảo" thì
+    bỏ cả dòng; chưa thì giữ dòng, chỉ gỡ dấu."""
+    lines = []
+    for line in text.split("\n"):
+        if APP_DISCLAIMER_MARKER in line:
+            if app_shows_disclaimer:
+                continue
+            line = line.replace(APP_DISCLAIMER_MARKER, "").rstrip()
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def available_versions(kind: str = "system") -> list[str]:
@@ -167,7 +228,11 @@ def prompt_shingles(
 ) -> frozenset[str]:
     """Tập các cụm `size` từ liên tiếp trong prompt, dùng để phát hiện văn bản
     có chép lại nội dung hướng dẫn hay không."""
-    shingles = _shingles(_words(load_prompt(kind, version)), size)
+    load_prompt(kind, version)  # cùng thông báo lỗi khi thiếu file
+    raw = (PROMPT_DIR / f"{kind}_{version}.md").read_text(encoding="utf-8")
+    shingles = set().union(
+        *(_shingles(_words(seg), size) for seg in _leak_checked_segments(raw))
+    )
     allowed = set().union(*(
         _shingles(_words(phrase), size) for phrase in _ALLOWED_BY_KIND.get(kind, ())
     ))

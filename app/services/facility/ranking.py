@@ -9,6 +9,7 @@ Lọc cứng (giữ cơ sở thoả ĐỒNG THỜI):
 Xếp hạng: mức khớp (chính → phụ → [trẻ em: cơ sở Nhi bất kỳ] → đa khoa), trẻ em
 ưu tiên cơ sở Nhi trong cùng mức, rồi gần hơn trước. Triệu chứng mà bảng map
 trỏ thẳng tới đa khoa (vd. sốt ở người lớn) thì đa khoa đứng cùng hạng chính.
+Chuyên khoa do model giả định (ngoài bảng) chỉ xếp ngang đa khoa, không hơn.
 """
 
 import math
@@ -71,8 +72,13 @@ def _match(facility: Facility, mapping: Mapping, group: str) -> tuple[str, tuple
     general_rank = _LEVEL["primary"] if mapping.general_symptoms else _LEVEL["general"]
     hits = [p for p in mapping.specialties.values() if p.key in facility.specialties]
     if hits:
-        level = "primary" if any(p.role == "primary" for p in hits) else "secondary"
-        rank = _LEVEL[level]
+        approved = [p for p in hits if not p.assumed]
+        if approved:
+            level = "primary" if any(p.role == "primary" for p in approved) else "secondary"
+            rank = _LEVEL[level]
+        else:
+            # Chỉ khớp chuyên khoa giả định: ngang đa khoa.
+            level, rank = "secondary", _LEVEL["general"]
         if facility.is_general:
             rank = min(rank, general_rank)
         return level, tuple(p.key for p in hits), rank
@@ -85,10 +91,13 @@ def _match(facility: Facility, mapping: Mapping, group: str) -> tuple[str, tuple
 
 def _reason(facility: Facility, mapping: Mapping, level: str, keys: tuple[str, ...], group: str) -> str:
     if keys:
-        parts = [
-            f"{_symptom_text(mapping.specialties[k].sources)} → {catalog.specialty_label(k)}"
-            for k in keys
-        ]
+        parts = []
+        for k in keys:
+            pick = mapping.specialties[k]
+            if pick.assumed:
+                parts.append(f"Bụt giả định: {pick.reason} → {catalog.specialty_label(k)}")
+            else:
+                parts.append(f"{_symptom_text(pick.sources)} → {catalog.specialty_label(k)}")
         head = "; ".join(parts)
     elif level == "pediatric":
         head = "Cơ sở Nhi: khám ban đầu cho trẻ"

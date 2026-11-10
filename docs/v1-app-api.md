@@ -101,20 +101,124 @@ data: {"type":"delta","text":"Đau đầu kéo dài 3 ngày "}
 
 data: {"type":"delta","text":"có nhiều nguyên nhân..."}
 
-data: {"type":"done","conversation_id":"…","should_see_doctor":false,"follow_up_questions":["…"],"quota_remaining":1}
+data: {"type":"done","conversation_id":"…","should_see_doctor":false,"follow_up_questions":["…"],"quota_remaining":1,"disclaimer":"Thông tin mang tính tham khảo, không thay thế khám chữa bệnh."}
 ```
 
 - Dòng bắt đầu bằng `:` là comment giữ kết nối, gửi mỗi 15 giây trong lúc chờ. App bỏ qua.
 - Câu trả lời được sinh xong rồi mới chia thành nhiều `delta` (khoảng 40 ký tự/phần). Nối các `text` lại ra đúng nguyên văn.
-- `done` có thêm `should_see_doctor`, `follow_up_questions`, `quota_remaining`. App chưa dùng thì bỏ qua.
+- `done` có thêm `should_see_doctor`, `follow_up_questions`, `quota_remaining`, `disclaimer`. App chưa dùng thì bỏ qua.
 - Lỗi sau khi stream đã mở (quá 120 giây, lỗi model): `data: {"type":"error","code":"unavailable","message":"…"}` rồi đóng. Lượt đó được hoàn.
 - App bỏ qua mọi `type` lạ.
 
 ### Trả về: JSON (`Accept: application/json`)
 
 ```json
-{"reply":"…","conversation_id":"…","should_see_doctor":false,"follow_up_questions":[],"quota_remaining":1}
+{"reply":"…","conversation_id":"…","should_see_doctor":false,"follow_up_questions":[],"quota_remaining":1,"disclaimer":"Thông tin mang tính tham khảo, không thay thế khám chữa bệnh."}
 ```
+
+### Trường `disclaimer` (KAN-134)
+
+- Có ở response JSON của `POST /v1/chat`, ở event `done` của SSE, và ở mọi tin `assistant` trong `GET /v1/conversations/{id}/messages`. Mọi đường trả lời đều có (câu chào, khủng hoảng / cấp cứu, ảnh không kèm câu hỏi). Giá trị lấy từ cấu hình `CHAT_DISCLAIMER`, mặc định: "Thông tin mang tính tham khảo, không thay thế khám chữa bệnh."
+- App hiển thị cố định dưới mỗi tin của Bụt, không bị che khi cuộn. App cũ bỏ qua trường này.
+- Sau khi bản App hiển thị `disclaimer` phát hành, bên AI bật `CHAT_DISCLAIMER_IN_APP=true`: Bụt thôi tự viết câu "chỉ tham khảo" trong `reply` (prompt bỏ quy tắc đó, câu đứng riêng khớp mẫu bị xoá), tránh hiện hai lần. Hãy báo bên AI khi App đã phát hành.
+
+## Ảnh giấy tờ y tế (OCR)
+
+Thiết kế đầy đủ: [docs/superpowers/specs/2026-11-06-chat-image-ocr-design.md](superpowers/specs/2026-11-06-chat-image-ocr-design.md).
+
+App upload ảnh lên Supabase Storage (bucket `health-documents`, đường dẫn `<user_id>/<uuid>.jpg`) rồi gửi đường dẫn trong `POST /v1/chat`. Backend tải ảnh bằng token của user, phân loại, đọc chữ, trích xuất và lưu. Chỉ xử lý khi user đã đồng ý `ai_chat` **và** `ai_share_profile`. Tính năng bật bằng `OCR_ENABLED`.
+
+**Rollout:** chỉ bật `OCR_ENABLED` khi **mọi** instance đã chạy bản này. Consumer bản cũ không biết `document_ids`: tin chỉ có ảnh sẽ bị coi là câu hỏi rỗng.
+
+### `attachments` trong `POST /v1/chat`
+
+```json
+{
+  "messages": [{"role": "user", "content": "Đơn thuốc này uống thế nào?"}],
+  "attachments": [{"path": "<user_id>/<uuid>.jpg", "profile_id": null}]
+}
+```
+
+- Tối đa 3 ảnh mỗi tin (`OCR_MAX_ATTACHMENTS`). `profile_id` là chuỗi app tự định nghĩa (thành viên gia đình), `null` = chủ tài khoản.
+- Ảnh phải là JPEG, PNG hoặc WebP thuần, tối đa 10 MB.
+- Tin chỉ có ảnh (`content` rỗng): **không gọi model chat, không trừ lượt chat**, API trả ngay câu cố định.
+- Response JSON và event `done` (SSE) có thêm `documents`:
+
+```json
+{"reply":"…","conversation_id":"…","quota_remaining":1,"documents":[{"id":"uuid","status":"received"}]}
+```
+
+```
+data: {"type":"done","conversation_id":"…","documents":[{"id":"uuid","status":"received"}],"quota_remaining":1,…}
+```
+
+Các ảnh của một tin được đọc song song, tổng thời gian tối đa `OCR_MESSAGE_BUDGET_SECONDS` (30 giây). Ảnh chưa đọc xong khi hết giờ chuyển thành `failed`; user gửi lại ảnh đó để đọc lại.
+
+Nếu request có ảnh thất bại sau khi đã nhận ảnh (429 hết lượt, 403/422 ở ảnh sau, 503), các tài liệu đã nhận được đánh dấu `failed`. Gửi lại đúng ảnh đó thì được đọc lại.
+
+### `GET /v1/documents?type=&limit=&cursor=`
+
+Tài liệu chưa xoá của user, mới trước. `type`: `prescription`, `lab_result`, `medical_record`, `imaging_report`, `imaging_film`, `other_medical`, `not_medical`. `limit` mặc định 20, tối đa 50. `cursor` = `next_cursor` của trang trước, **app phải URL-encode** (có dấu `+` và `:`).
+
+```json
+{
+  "documents": [
+    {"id":"uuid","doc_type":"prescription","title":"Đơn thuốc – Bệnh viện Đa khoa – 03/11/2026","doc_date":"2026-11-03","status":"done","storage_path":"<user_id>/<uuid>.jpg","profile_id":null,"created_at":"2026-11-06T03:12:44+00:00"}
+  ],
+  "next_cursor": null
+}
+```
+
+App tự lấy ảnh từ Storage bằng `storage_path`. **Luôn lấy ảnh qua `documents[].id` → `storage_path`**, không dùng đường dẫn app vừa upload: gửi lại một ảnh đã có (trùng nội dung), service giữ bản cũ và **xoá object vừa upload**, nên `storage_path` của tài liệu là đường dẫn của lần upload đầu.
+
+### `GET /v1/documents/{id}`
+
+Như một mục ở trên, thêm `ocr_text`, `extraction` (bản trích xuất mới nhất, theo từng loại, xem spec mục 5) và `uncertain_fields` (đường dẫn các trường model không chắc, app nên đánh dấu). Tài liệu của người khác hoặc đã xoá: `404 not_found`.
+
+```json
+{"id":"uuid","doc_type":"lab_result","status":"done","ocr_text":"…","extraction":{"doc_date":"2026-11-01","tests":[{"name":"Glucose","value":"7.8","unit":"mmol/L","reference_range":"3.9 - 6.4","flag_as_printed":"H"}],"uncertain_fields":[]},"uncertain_fields":[],"…":"…"}
+```
+
+### `DELETE /v1/documents/{id}`
+
+Ẩn ngay và xoá ảnh trên Storage bằng token user, trả `204`. Bản ghi DB bị xoá hẳn sau `HISTORY_PURGE_AFTER_DAYS` ngày. Xoá hội thoại không xoá tài liệu. Tài liệu không có, đã xoá, hoặc của tài khoản khác: `404 not_found`.
+
+### `DELETE /v1/documents`
+
+Xoá **toàn bộ** giấy tờ của tài khoản: ẩn mọi tài liệu ngay và xoá từng ảnh trên Storage bằng token user (xoá ảnh lỗi thì vẫn trả `204`, service ghi log). Luôn trả `204` (kể cả khi không có gì để xoá), nên gọi lại an toàn.
+
+**Xoá tài khoản:** app gọi `DELETE /v1/documents` **và** `DELETE /v1/conversations` **trước khi** xoá tài khoản Supabase (xoá tài khoản xong thì token không dùng được để xoá ảnh nữa). Gọi lỗi (`503`, mất mạng) thì chưa xoá tài khoản, cho user thử lại.
+
+### Trạng thái (`status`)
+
+| `status` | Ý nghĩa | Trừ hạn mức ảnh |
+|---|---|---|
+| `received` | Đã nhận, chưa đọc | không |
+| `processing` | Đang đọc | không |
+| `done` | Đã đọc và trích xuất. Phim chụp (`imaging_film`) cũng là `done` nhưng chỉ phân loại và lưu, không đọc: `ocr_text` / `extraction` là `null` | chỉ khi bước OCR thực sự chạy (phim chụp: không) |
+| `skipped` | Không phải giấy tờ y tế, hoặc phân loại không đủ chắc chắn | không |
+| `unreadable` | Ảnh mờ / không đọc được, nên chụp lại | không |
+| `quota_exceeded` | Hết `OCR_MAX_PER_DAY` (3 ảnh/ngày) | không |
+| `failed` | Lỗi model, hết `OCR_MESSAGE_BUDGET_SECONDS`, hoặc request thất bại sau khi nhận ảnh; gửi lại để đọc lại | không (hoàn nếu đã trừ) |
+
+### Lỗi riêng cho ảnh
+
+| HTTP | `error` | Khi nào |
+|---|---|---|
+| 403 | `not_enabled` | `OCR_ENABLED` tắt mà tin có `attachments` |
+| 403 | `consent_required` kèm `"consent": "share_profile"` | Chưa đồng ý chia sẻ hồ sơ: App hiện popup chia sẻ |
+| 403 | `forbidden` | `path` không thuộc `<user_id>` của token |
+| 422 | `invalid_attachment` | Không tìm thấy ảnh, không phải JPEG/PNG/WebP thuần, quá 10 MB |
+| 422 | `invalid_request` kèm `max_attachments` | Quá số ảnh mỗi tin |
+
+### Việc của team App
+
+1. Tạo bucket riêng tư `health-documents`; policy: user chỉ đọc / ghi / xoá object dưới `{auth.uid()}/`.
+2. Trước khi upload, **re-encode mọi ảnh thành JPEG thuần**: chuyển HEIC sang JPEG, xoá EXIF, thu nhỏ cạnh dài tối đa 2048 px. JPEG chụp từ điện thoại mà Pillow nhận là "MPO" bị từ chối (`422 invalid_attachment`), nên không upload nguyên file camera.
+3. Gửi `attachments` (`path`, `profile_id`) trong `POST /v1/chat`; xử lý `documents` trong response / `done`.
+4. Màn hồ sơ: danh sách, chi tiết (dữ liệu trích xuất, đánh dấu `uncertain_fields`), xoá, hiển thị trạng thái (kể cả `failed` / `unreadable` với nút gửi lại). Hiển thị ảnh qua `documents[].id` → `storage_path`, không qua đường dẫn vừa upload.
+5. Nội dung popup chia sẻ hồ sơ nói rõ có lưu ảnh và dữ liệu giấy tờ y tế.
+6. Xoá tài khoản: gọi `DELETE /v1/documents` và `DELETE /v1/conversations` trước khi xoá tài khoản Supabase.
 
 ## Lịch sử chat
 
@@ -164,7 +268,10 @@ Tin nhắn của một hội thoại. Trang đầu là các tin **mới nhất**
 }
 ```
 
+- Tin `assistant` có thêm `disclaimer` (cùng giá trị như `/v1/chat`).
+
 - `should_see_doctor`, `follow_up_questions` chỉ có ở tin `assistant`. Lượt lưu trước 2026-11-02 có `follow_up_questions: []`.
+- Tin `user` gửi kèm ảnh có thêm `documents`: danh sách id tài liệu (`["uuid", …]`); chi tiết lấy qua `GET /v1/documents/{id}`. Tin chỉ có ảnh có `content` rỗng.
 - Một trang có thể bắt đầu bằng tin `assistant` (câu hỏi của nó nằm ở trang trước).
 - Hội thoại không tồn tại, `conversation_id` không phải UUID, hoặc của tài khoản khác đều trả `404 not_found`.
 - Tiếp tục hội thoại: gửi `POST /v1/chat` với đúng `conversation_id` này. Chỉ gửi tối đa 48 message (`/v1/chat` trả `422` nếu nhiều hơn); service chỉ dùng câu hỏi cuối và tự nạp ngữ cảnh.
@@ -179,7 +286,7 @@ Hội thoại đã xoá không mở lại được: hỏi tiếp bằng `convers
 
 Xoá **toàn bộ** lịch sử của tài khoản. Luôn trả `204` (kể cả khi không có gì để xoá), nên gọi lại an toàn.
 
-**Xoá tài khoản:** app gọi API này **trước khi** xoá tài khoản Supabase (xoá tài khoản xong thì token không dùng được nữa). Gọi lỗi (`503`, mất mạng) thì chưa xoá tài khoản, cho user thử lại.
+**Xoá tài khoản:** app gọi API này **và** `DELETE /v1/documents` **trước khi** xoá tài khoản Supabase (xoá tài khoản xong thì token không dùng được nữa). Gọi lỗi (`503`, mất mạng) thì chưa xoá tài khoản, cho user thử lại.
 
 ## `POST /v1/report/monthly`
 

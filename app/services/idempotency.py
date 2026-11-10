@@ -17,6 +17,10 @@ def _response_key(request_id: UUID | str) -> str:
     return f"resp:{request_id}"
 
 
+def _documents_key(request_id: UUID | str) -> str:
+    return f"req_docs:{request_id}"
+
+
 async def claim(redis: Redis, request_id: UUID | str) -> bool:
     """
     Giữ chỗ cho request_id ở tầng API. Trả về True nếu đây là lần đầu thấy
@@ -54,3 +58,23 @@ async def save_response(redis: Redis, request_id: UUID | str, payload: dict[str,
         json.dumps(payload, ensure_ascii=False),
         ex=settings.dedup_ttl_seconds,
     )
+
+
+async def is_claimed(redis: Redis, request_id: UUID | str) -> bool:
+    """Chỉ đọc, không giữ chỗ: dùng để biết trước một request là lần thử lại."""
+    return bool(await redis.exists(_claim_key(request_id)))
+
+
+async def save_documents(redis: Redis, request_id: UUID | str, documents: list[dict[str, Any]]) -> None:
+    """Ghi danh sách ảnh đã nhận của request, để lần thử lại trả đúng danh sách
+    đó mà không phải nhận lại ảnh."""
+    await redis.set(
+        _documents_key(request_id),
+        json.dumps(documents, ensure_ascii=False),
+        ex=settings.dedup_ttl_seconds,
+    )
+
+
+async def get_documents(redis: Redis, request_id: UUID | str) -> list[dict[str, Any]] | None:
+    raw = await redis.get(_documents_key(request_id))
+    return json.loads(raw) if raw else None

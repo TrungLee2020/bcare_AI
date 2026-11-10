@@ -1,6 +1,10 @@
 # Gợi ý cơ sở khám theo triệu chứng (`/v1/facility/suggest`) — KAN-115
 
-**Trạng thái (2026-11-03):** team App đã duyệt hợp đồng (mục 2–4) và làm xong mục 8 (gồm cả `age: null`, `locale`, luồng 429); client nằm sau cờ `FACILITY_AI` của app. Chờ migration `20261102000000_facility_audience_and_fixes.sql` chạy trên production rồi bật `FACILITY_AUDIENCE_COLUMN=true`. Product còn chốt các câu ở mục 7; chỗ nào chưa chốt thì service đang chạy theo đề xuất ghi ở đó.
+**Trạng thái (2026-11-05):** team App đã duyệt hợp đồng (mục 2–4) và làm xong mục 8 (gồm cả `age: null`, `locale`, luồng 429). App phát hành 05/11; bản Android 2034 đã bật cờ `FACILITY_AI`, nên đã có lượt gọi thật. Migration `20261102000000_facility_audience_and_fixes.sql` đã chạy trên production tối 03/11; server đã bật `FACILITY_AUDIENCE_COLUMN=true` ngày 05/11, nên DB là nguồn đúng và `facility_overrides.json` không còn dùng. Product còn chốt các câu ở mục 7; chỗ nào chưa chốt thì service đang chạy theo đề xuất ghi ở đó.
+
+**Cập nhật 2026-11-06:** thêm 35 triệu chứng bổ sung ngoài 25 thẻ của app (mục 4.1) và bước đối chiếu nguyên chữ sau khi model đọc câu gõ (mục 4.2), prompt `facility_v2`. Sửa lỗi log production 05/11: "Trầm cảm" bị log `facility_unmapped` và app hiện ghi chú "chưa có trong bảng" dù đã gợi ý đúng Tâm thần – Tâm lý.
+
+**Cập nhật 2026-11-07 (KAN-134):** với cụm ngoài bảng, Bụt giả định một chuyên khoa thay vì chỉ ghi "chưa có trong bảng" (mục 4.3), prompt `facility_v3`.
 
 Code: [`app/services/facility/`](../app/services/facility/), endpoint trong [`app/api/v1.py`](../app/api/v1.py), prompt [`prompts/facility_v1.md`](../prompts/facility_v1.md), dữ liệu [`app/facility_data/`](../app/facility_data/), test [`tests/test_facility.py`](../tests/test_facility.py).
 
@@ -19,7 +23,7 @@ Chia việc trong service:
 
 | Bước | Làm bằng | Ghi chú |
 |---|---|---|
-| 1. Chuẩn hoá triệu chứng | Thẻ app gửi: dùng thẳng. Câu gõ tự do: LLM, chỉ được trả key trong `symptom_tags.json` | LLM không được trả key lạ; key lạ bị bỏ |
+| 1. Chuẩn hoá triệu chứng | Thẻ app gửi: dùng thẳng. Câu gõ tự do: LLM, chỉ được trả key trong `symptom_tags.json` hoặc `extra_symptoms.json`, rồi code đối chiếu nguyên chữ (mục 4.2) | LLM không được trả key lạ; key lạ bị bỏ |
 | 2. Map sang chuyên khoa | Code, tra `symptom_specialty_map` | LLM chỉ góp phần "bối cảnh" (vd. *sau té ngã*), không tự chọn chuyên khoa |
 | 3. Lọc cứng (chuyên khoa + tuổi) | Code | Không bao giờ giao cho LLM |
 | 4. Xếp hạng + lý do | Code | Lý do sinh từ dữ liệu, không do LLM viết |
@@ -71,7 +75,8 @@ Mọi response có `interpretation` và `data_version` (`max(updated_at)` của 
     { "key": "dizziness", "name": "Chóng mặt", "source": "text", "matched_text": "hay choáng" }
   ],
   "specialties": [
-    { "key": "than_kinh", "label": "Nội thần kinh", "role": "primary", "from": ["headache", "dizziness"] }
+    { "key": "than_kinh", "label": "Nội thần kinh", "role": "primary", "from": ["headache", "dizziness"],
+      "assumed": false, "reason": "" }
   ],
   "fallback_general": true,
   "unmapped_text": [],
@@ -80,6 +85,8 @@ Mọi response có `interpretation` và `data_version` (`max(updated_at)` của 
 ```
 
 - `role`: `primary` | `secondary`. Đa khoa không nằm trong danh sách này; `fallback_general: true` nghĩa là cơ sở đa khoa được dùng làm dự phòng (hiện luôn true).
+- `symptoms[].key`: thẻ của app, **hoặc** key triệu chứng bổ sung (mục 4.1, vd `toothache`, `menstrual`) khi `source` là `text`. App hiển thị theo `name`, không tra key trong danh sách thẻ của app.
+- `assumed` / `reason`: luôn có ở mỗi mục. `assumed: true` khi chuyên khoa do Bụt giả định (mục 4.3), kèm `reason` (≤ 80 ký tự); mục từ bảng có `assumed: false` và `reason: ""`.
 - `from`: key triệu chứng dẫn tới chuyên khoa, hoặc `mental` (người dùng nói rõ vấn đề tinh thần), `choice` (người dùng chọn ở câu hỏi làm rõ).
 - `unmapped_text`: phần câu gõ không khớp thẻ nào (vd. `["đau răng"]`).
 - `note`: câu giải thích khi đang gợi ý chung (không có chuyên khoa nào), khi một phần mô tả chưa có trong bảng, hoặc khi chưa đọc được câu gõ (LLM lỗi). `null` khi không có gì cần nói.
@@ -215,6 +222,55 @@ Thêm vài luật theo tên làm lưới an toàn cho dòng chưa có trong danh
 
 **Triệu chứng chưa có trong bảng map**: gợi ý đa khoa, ghi `note`, và ghi log cụm từ chưa map (`facility_unmapped phrase=…`, không kèm user id, không kèm toạ độ) để team bổ sung bảng. Không map theo chữ gần giống.
 
+### 4.1 Triệu chứng bổ sung (`extra_symptoms.json`)
+
+35 mục ngoài 25 thẻ của app, dựng từ bảng mapping tham khảo trong ticket (Google Doc), mỗi mục có tên, từ đồng nghĩa và chuyên khoa chính / phụ cho người lớn và trẻ em. Chỉ dùng các key chuyên khoa DB đang có; nhóm nào DB chưa có khoa riêng thì về đa khoa. **Đề xuất phía AI, cần Product duyệt** (thay cho mục 7.8).
+
+| Nhóm | Mục | Chuyên khoa (người lớn) |
+|---|---|---|
+| Răng miệng | Đau răng, Chảy máu chân răng, Nhiệt miệng | Răng Hàm Mặt (nhiệt miệng: Tai Mũi Họng, phụ RHM) |
+| Mắt | Mờ mắt, Đau / đỏ mắt | Mắt |
+| Tai mũi họng | Đau / ù tai, Chảy máu cam, Ngủ ngáy, Viêm xoang | Tai Mũi Họng |
+| Tiêu hoá | Ợ chua / trào ngược, Đi ngoài ra máu, Vàng da | Tiêu hoá (ra máu: phụ Ngoại tổng quát) |
+| Ngoại | Trĩ / đau hậu môn, Thoát vị / sưng bẹn, Nghi sỏi thận | Ngoại tổng quát |
+| Tiết niệu, nam khoa | Tiểu buốt / tiểu rắt, Vấn đề nam khoa | Đa khoa, phụ Ngoại tổng quát (DB chưa có Tiết niệu, Nam khoa) |
+| Sản phụ khoa | Rối loạn kinh nguyệt, Mang thai | Sản – Phụ khoa |
+| Ung bướu | Khối u / nổi hạch | Ung bướu, phụ Ngoại tổng quát |
+| Nội tiết | Bướu cổ / tuyến giáp, Khát nước / tiểu nhiều | Nội tiết |
+| Tim mạch | Huyết áp cao / mỡ máu, Phù chân / phù mặt | Tim mạch (phù: cùng hạng đa khoa) |
+| Cơ xương khớp, chấn thương | Đau cổ vai gáy; Bong gân / trật khớp / gãy xương, Bỏng | Cơ xương khớp; Ngoại chấn thương |
+| Da | Mụn, nấm da, chàm | Da liễu |
+| Thần kinh, tâm lý | Co giật / động kinh; Vấn đề tâm lý, Chậm nói / tăng động | Nội thần kinh; Tâm thần – Tâm lý |
+| Khác | Thiếu máu, Khám tổng quát; Nghi sốt xuất huyết; Châm cứu / phục hồi | Đa khoa; Truyền nhiễm – Nhiệt đới; Y học cổ truyền |
+
+Trẻ em: phần lớn giống người lớn; mục mà người lớn về đa khoa thì trẻ em về Nhi.
+
+### 4.2 Đối chiếu nguyên chữ sau khi model đọc
+
+Model nhỏ có lúc đặt đúng từ đồng nghĩa vào `unmapped` ("sổ mũi", "ói"), chép cụm đã xử lý bằng cờ vào `unmapped` ("Trầm cảm" khi đã bật `mental_health`), hoặc hiểu sai câu không dấu ("dau da day" thành đau đầu). Sau bước đọc, code đối chiếu câu gõ với tên và từ đồng nghĩa trong cả hai bảng:
+
+- Cụm khớp trọn tên / từ đồng nghĩa mà model bỏ sót → thêm triệu chứng đó.
+- Căn cứ (`matched_text`) của model khớp trọn cụm của triệu chứng khác → tin bảng. Căn cứ là cách nói không có trong bảng → giữ lựa chọn của model.
+- `unmapped` bỏ cụm có trong bảng, cụm đã nằm trong một triệu chứng đã nhận, và cụm "thần kinh" khi đã hỏi lại (`ambiguous_neuro`).
+- Ưu tiên cụm dài nhất tại mỗi vị trí ("đau đầu gối" là đau khớp). Bỏ cụm đứng sau từ phủ định trong cùng vế câu ("không sốt nhưng ho" vẫn nhận ho).
+- Câu có dấu thì khớp cả dấu ("bị tiêu chảy" không phải "bí tiểu"). Câu không dấu thì không dùng cụm một từ và cụm trùng nhau khi bỏ dấu ("kho tieu", "do mat"); những câu này để model đọc.
+
+Đo 2026-11-06 với `gpt-5-nano`, mỗi câu 2 lần. Trước sửa (30 câu, 60 lượt): 5 lượt mất từ đồng nghĩa có sẵn hoặc hiểu sai ("sổ mũi", "ói", "dau da day", "bong gân"), 16 lượt ra đa khoa vì cụm chưa có trong bảng (đau răng, mờ mắt, trễ kinh, tiểu buốt, ù tai, đau cổ vai gáy, ợ chua). Sau sửa (37 câu, 74 lượt, thêm "Trầm cảm", "lo âu", câu phủ định): không còn lượt nào như vậy; `unmapped` chỉ còn "đau gót chân" (1/2 lượt), đúng là cụm chưa có trong bảng.
+
+## 4.3 Giả định chuyên khoa (KAN-134)
+
+Cụm triệu chứng không có trong bảng đã duyệt (vd. "đau gót chân mỗi sáng", "nhìn một thành hai") không còn rơi vào chỗ trống: model đề xuất một chuyên khoa kèm lý do ngắn, service kiểm rồi dùng làm gợi ý có nhãn.
+
+- Schema: mục trong `interpretation.specialties[]` có thêm `assumed` (`true` khi do Bụt giả định, `false` với mục từ bảng) và `reason` (tối đa 80 ký tự; luôn có mặt, bằng `""` khi `assumed: false`). Mục giả định có `role: "secondary"` và `from: ["assumed"]`.
+- Xếp hạng: cơ sở chỉ khớp chuyên khoa giả định xếp **ngang đa khoa**, dưới cơ sở khớp chuyên khoa từ bảng. `facilities[].match` vẫn là `secondary`, `reason` của cơ sở bắt đầu bằng "Bụt giả định: …".
+- Bảng đã duyệt luôn thắng: chuyên khoa vừa có từ bảng vừa được giả định giữ vai của bảng, `assumed: false`.
+- `interpretation.note` giải thích: "Một phần mô tả chưa có trong bảng; Bụt tạm đoán chuyên khoa …, kèm cơ sở đa khoa để bạn chọn."
+- Không bao giờ giả định `tam_than`, `nhi`, `ung_buou`, `y_hoc_co_truyen`: Tâm thần và Nhi chỉ đi theo bảng / cờ; "Ung bướu" đoán sai làm người dùng hoảng (khối u đi qua thẻ "khối u" đã duyệt); Y học cổ truyền là lựa chọn của người dùng, không phải chuyên khoa theo triệu chứng.
+- Giả định chỉ hoạt động khi `FACILITY_PROMPT_VERSION` ≥ `v3` (luật giả định nằm trong prompt đó). Với `v1` / `v2`, service không đưa bảng chuyên khoa cho model và bỏ qua mọi giả định; cụm ngoài bảng vẫn được ghi log với `guess=none`.
+- Log: `facility_unmapped phrase=… guess=<mã chuyên khoa hoặc none> group=…` (không user id, không toạ độ); metric `facility_guess_<mã>`, `facility_guess_none`.
+- App: hiển thị mục `assumed: true` với nhãn "Bụt giả định" kèm `reason`.
+- Product: xem log `guess=` định kỳ; cụm nào đúng thì đưa vào `app/facility_data/extra_symptoms.json` để thành mapping đã duyệt.
+
 ## 5. Dữ liệu cơ sở
 
 Service đọc `facilities` qua Supabase REST bằng anon key (đã có `SUPABASE_URL`, `SUPABASE_ANON_KEY` trong `.env`):
@@ -248,13 +304,13 @@ Từ đối chiếu với bảng mapping tham khảo trong ticket:
 5. **Chấn thương:** bảng tham khảo xếp trật khớp, bong gân, gãy xương vào Cơ xương khớp; app có riêng `ngoai_chan_thuong`. Đề xuất: có té ngã / va đập / tai nạn → `ngoai_chan_thuong`, đau mạn tính → `co_xuong_khop`.
 6. **Bối cảnh sau chấn thương đầu:** thêm cho `headache`, `numbness` (bản nháp mới có ở đau khớp, đau lưng). Chảy máu tai / mũi, lơ mơ sau chấn thương đầu → `emergency` (`head_injury`). Đang chạy như vậy.
 7. **Khàn tiếng:** bảng tham khảo xếp vào Phẫu thuật lồng ngực; đề xuất giữ Tai mũi họng như bản nháp.
-8. **Chuyên khoa không có thẻ triệu chứng:** `mat`, `rang_ham_mat`, `san`, `ung_buou`, `y_hoc_co_truyen`, `ngoai_chan_thuong` không thẻ nào dẫn tới, nên "đau răng", "mờ mắt" hiện sẽ ra đa khoa. Đề xuất thêm vào bảng map một mục "cụm từ → chuyên khoa" cho các khoa này, Product duyệt danh sách cụm từ. Chưa duyệt thì service giữ luật chặt: ra đa khoa.
+8. **Chuyên khoa không có thẻ triệu chứng:** *(2026-11-06: đã làm theo hướng này ở mục 4.1, chờ Product duyệt danh sách)* `mat`, `rang_ham_mat`, `san`, `ung_buou`, `y_hoc_co_truyen`, `ngoai_chan_thuong` không thẻ nào dẫn tới, nên "đau răng", "mờ mắt" hiện sẽ ra đa khoa. Đề xuất thêm vào bảng map một mục "cụm từ → chuyên khoa" cho các khoa này, Product duyệt danh sách cụm từ. Chưa duyệt thì service giữ luật chặt: ra đa khoa.
 
 ## 8. Cần team App / data làm
 
 Team App đã làm xong (2026-11-02):
 
-1. Migration `20261102000000_facility_audience_and_fixes.sql`: cột `audience` (mặc định `all`), 17 cơ sở `child`, 4 BV Lão khoa `adult`, sửa 43 dòng `is_general`, bỏ `than_kinh` ở 3 BV Tâm thần. **Chưa chạy trên production**; Hiếu chạy xong thì bên AI đặt `FACILITY_AUDIENCE_COLUMN=true` và khởi động lại app.
+1. Migration `20261102000000_facility_audience_and_fixes.sql`: cột `audience` (mặc định `all`), 17 cơ sở `child`, 4 BV Lão khoa `adult`, sửa 43 dòng `is_general`, bỏ `than_kinh` ở 3 BV Tâm thần. **Đã chạy trên production tối 03/11** (Hiếu kiểm lại: 17 cơ sở `child`, 4 BV Lão khoa `adult`).
 2. Key mới `truyen_nhiem` ("Truyền nhiễm – Nhiệt đới") cho 6 BV Nhiệt đới / Truyền nhiễm; bên AI đã thêm làm chuyên khoa phụ của `fever` ở người lớn. Chấp nhận ẩn: Lão khoa, Phục hồi chức năng, Điều dưỡng, điểm xét nghiệm, điểm tiêm phòng, y tế dự phòng, BV Thận Hà Nội, Viện Huyết học. Viện Pháp y Tâm thần `is_active = false`.
 3. Nhãn `than_kinh` là "Nội thần kinh" trong app.
 4. "Tìm cho: Tôi / Trẻ em": "Tôi" gửi tuổi từ hồ sơ, "Trẻ em" nhập 0–16, không lưu.
@@ -267,4 +323,6 @@ Team App xác nhận thêm (2026-11-03, nhánh develop, chưa phát hành, vẫn
 8. Gặp `429 rate_limited` ở lượt có câu gõ: đã chọn thẻ → nút "Tìm bằng thẻ đã chọn" gửi lại **không có `text`** (lượt này không gọi model nên không bị 429); chưa chọn thẻ → nút "Chọn thẻ triệu chứng" xoá câu gõ, về khung nhập. Lượt chỉ có thẻ mà vẫn 429 (chỉ có thể là rate limit của nginx) thì app chỉ báo hết lượt.
 9. Thời gian chờ 30 giây. `emergency`, `radius_km` kèm `clarify_choice`, `id` giữ nguyên như hợp đồng.
 
-Còn chờ: Hiếu báo đã chạy migration `20261102000000_facility_audience_and_fixes.sql` trên production → bên AI đặt `FACILITY_AUDIENCE_COLUMN=true` và tạo lại container.
+App phát hành 05/11 trên cả hai store; bản Android 2034 bật `FACILITY_AI`. KAN-118 (phần việc phía App) đã Done.
+
+Phía AI đã đặt `FACILITY_AUDIENCE_COLUMN=true` trên server và deploy lại (05/11).

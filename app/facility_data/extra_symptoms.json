@@ -1,0 +1,1009 @@
+{
+ "status": "ĐỀ XUẤT phía AI (2026-11-06), cần Product (Tristan) duyệt. Dựng từ bảng mapping tham khảo trong KAN-115 (Google Doc), chỉ map về các key chuyên khoa DB đang có. Mục nào DB chưa có khoa riêng (tiết niệu, nam khoa, huyết học) thì về đa khoa.",
+ "note": "Không phải thẻ của app: app không gửi các key này trong symptom_tags; chỉ model đọc câu gõ và bước đối chiếu chữ trả ra. 'da_khoa' = cơ sở đa khoa (is_general), giống symptom_specialty_map.json.",
+ "symptoms": [
+  {
+   "key": "toothache",
+   "name": "Đau răng",
+   "synonyms": [
+    "nhức răng",
+    "sâu răng",
+    "sưng răng",
+    "răng lung lay",
+    "ê buốt răng",
+    "ê răng",
+    "mọc răng khôn",
+    "răng khôn",
+    "nhổ răng",
+    "khám răng"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "rang_ham_mat"
+     ],
+     "secondary": []
+    },
+    "child": {
+     "primary": [
+      "rang_ham_mat"
+     ],
+     "secondary": []
+    }
+   }
+  },
+  {
+   "key": "gum_problem",
+   "name": "Chảy máu chân răng",
+   "synonyms": [
+    "chảy máu nướu",
+    "chảy máu lợi",
+    "sưng nướu",
+    "sưng lợi",
+    "viêm nướu",
+    "viêm lợi",
+    "hôi miệng"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "rang_ham_mat"
+     ],
+     "secondary": []
+    },
+    "child": {
+     "primary": [
+      "rang_ham_mat"
+     ],
+     "secondary": []
+    }
+   }
+  },
+  {
+   "key": "mouth_ulcer",
+   "name": "Nhiệt miệng",
+   "synonyms": [
+    "loét miệng",
+    "lở miệng",
+    "nhiệt lưỡi",
+    "loét lưỡi"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "tai_mui_hong"
+     ],
+     "secondary": [
+      "rang_ham_mat"
+     ]
+    },
+    "child": {
+     "primary": [
+      "nhi"
+     ],
+     "secondary": [
+      "rang_ham_mat"
+     ]
+    }
+   }
+  },
+  {
+   "key": "blurry_vision",
+   "name": "Mờ mắt",
+   "synonyms": [
+    "mắt mờ",
+    "nhìn mờ",
+    "nhìn kém",
+    "mắt kém",
+    "giảm thị lực",
+    "cận thị",
+    "viễn thị",
+    "loạn thị",
+    "đo mắt",
+    "khám mắt"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "mat"
+     ],
+     "secondary": []
+    },
+    "child": {
+     "primary": [
+      "mat"
+     ],
+     "secondary": []
+    }
+   }
+  },
+  {
+   "key": "eye_pain",
+   "name": "Đau, đỏ mắt",
+   "synonyms": [
+    "đỏ mắt",
+    "đau mắt",
+    "đau mắt đỏ",
+    "cộm mắt",
+    "ngứa mắt",
+    "chảy nước mắt",
+    "lẹo mắt",
+    "chắp mắt",
+    "viêm kết mạc"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "mat"
+     ],
+     "secondary": []
+    },
+    "child": {
+     "primary": [
+      "mat"
+     ],
+     "secondary": []
+    }
+   }
+  },
+  {
+   "key": "ear_problem",
+   "name": "Đau tai, ù tai",
+   "synonyms": [
+    "ù tai",
+    "đau tai",
+    "nghe kém",
+    "lãng tai",
+    "điếc",
+    "chảy mủ tai",
+    "chảy dịch tai",
+    "viêm tai"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "tai_mui_hong"
+     ],
+     "secondary": []
+    },
+    "child": {
+     "primary": [
+      "tai_mui_hong"
+     ],
+     "secondary": []
+    }
+   }
+  },
+  {
+   "key": "nosebleed",
+   "name": "Chảy máu cam",
+   "synonyms": [
+    "chảy máu mũi",
+    "chảy máu cam"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "tai_mui_hong"
+     ],
+     "secondary": []
+    },
+    "child": {
+     "primary": [
+      "nhi"
+     ],
+     "secondary": [
+      "tai_mui_hong"
+     ]
+    }
+   }
+  },
+  {
+   "key": "snoring",
+   "name": "Ngủ ngáy",
+   "synonyms": [
+    "ngủ ngáy",
+    "ngáy to",
+    "ngưng thở khi ngủ"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "tai_mui_hong"
+     ],
+     "secondary": []
+    },
+    "child": {
+     "primary": [
+      "tai_mui_hong"
+     ],
+     "secondary": []
+    }
+   }
+  },
+  {
+   "key": "sinusitis",
+   "name": "Viêm xoang",
+   "synonyms": [
+    "viêm xoang",
+    "đau xoang",
+    "viêm mũi dị ứng",
+    "amidan"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "tai_mui_hong"
+     ],
+     "secondary": []
+    },
+    "child": {
+     "primary": [
+      "tai_mui_hong"
+     ],
+     "secondary": []
+    }
+   }
+  },
+  {
+   "key": "heartburn",
+   "name": "Ợ chua, trào ngược",
+   "synonyms": [
+    "ợ chua",
+    "trào ngược",
+    "trào ngược dạ dày",
+    "ợ nóng",
+    "nóng rát thượng vị"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "tieu_hoa"
+     ],
+     "secondary": []
+    },
+    "child": {
+     "primary": [
+      "tieu_hoa"
+     ],
+     "secondary": []
+    }
+   }
+  },
+  {
+   "key": "rectal_bleeding",
+   "name": "Đi ngoài ra máu",
+   "synonyms": [
+    "đi cầu ra máu",
+    "đi ngoài ra máu",
+    "đại tiện ra máu",
+    "phân có máu",
+    "đi ngoài phân đen"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "tieu_hoa"
+     ],
+     "secondary": [
+      "ngoai_tong_quat"
+     ]
+    },
+    "child": {
+     "primary": [
+      "tieu_hoa"
+     ],
+     "secondary": [
+      "ngoai_tong_quat"
+     ]
+    }
+   }
+  },
+  {
+   "key": "hemorrhoid",
+   "name": "Trĩ, đau hậu môn",
+   "synonyms": [
+    "bệnh trĩ",
+    "búi trĩ",
+    "đau hậu môn",
+    "nứt kẽ hậu môn",
+    "rò hậu môn",
+    "sưng hậu môn"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "ngoai_tong_quat"
+     ],
+     "secondary": []
+    },
+    "child": {
+     "primary": [
+      "ngoai_tong_quat"
+     ],
+     "secondary": []
+    }
+   }
+  },
+  {
+   "key": "jaundice",
+   "name": "Vàng da",
+   "synonyms": [
+    "vàng da",
+    "vàng mắt",
+    "vàng da vàng mắt"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "tieu_hoa"
+     ],
+     "secondary": []
+    },
+    "child": {
+     "primary": [
+      "nhi"
+     ],
+     "secondary": [
+      "tieu_hoa"
+     ]
+    }
+   }
+  },
+  {
+   "key": "hernia",
+   "name": "Thoát vị, sưng bẹn",
+   "synonyms": [
+    "thoát vị bẹn",
+    "sưng bẹn",
+    "khối phồng ở bẹn",
+    "thoát vị rốn"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "ngoai_tong_quat"
+     ],
+     "secondary": []
+    },
+    "child": {
+     "primary": [
+      "ngoai_tong_quat"
+     ],
+     "secondary": []
+    }
+   }
+  },
+  {
+   "key": "urinary",
+   "name": "Tiểu buốt, tiểu rắt",
+   "synonyms": [
+    "tiểu buốt",
+    "tiểu rắt",
+    "tiểu lắt nhắt",
+    "tiểu gắt",
+    "đau khi tiểu",
+    "tiểu ra máu",
+    "tiểu đêm",
+    "nước tiểu đục",
+    "khó tiểu"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "da_khoa"
+     ],
+     "secondary": [
+      "ngoai_tong_quat"
+     ]
+    },
+    "child": {
+     "primary": [
+      "nhi"
+     ],
+     "secondary": []
+    }
+   }
+  },
+  {
+   "key": "kidney_stone",
+   "name": "Nghi sỏi thận",
+   "synonyms": [
+    "sỏi thận",
+    "sỏi tiết niệu",
+    "sỏi niệu quản",
+    "đau quặn thận",
+    "đau lưng lan xuống háng"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "ngoai_tong_quat"
+     ],
+     "secondary": []
+    },
+    "child": {
+     "primary": [
+      "ngoai_tong_quat"
+     ],
+     "secondary": []
+    }
+   }
+  },
+  {
+   "key": "menstrual",
+   "name": "Rối loạn kinh nguyệt",
+   "synonyms": [
+    "trễ kinh",
+    "chậm kinh",
+    "kinh nguyệt không đều",
+    "rong kinh",
+    "đau bụng kinh",
+    "ra máu bất thường",
+    "ra huyết bất thường",
+    "khí hư",
+    "huyết trắng",
+    "ngứa vùng kín",
+    "khám phụ khoa"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "san"
+     ],
+     "secondary": []
+    },
+    "child": {
+     "primary": [
+      "san"
+     ],
+     "secondary": [
+      "nhi"
+     ]
+    }
+   }
+  },
+  {
+   "key": "pregnancy",
+   "name": "Mang thai",
+   "synonyms": [
+    "mang thai",
+    "có thai",
+    "có bầu",
+    "khám thai",
+    "siêu âm thai",
+    "thai sản",
+    "nghi có thai"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "san"
+     ],
+     "secondary": []
+    },
+    "child": {
+     "primary": [
+      "san"
+     ],
+     "secondary": []
+    }
+   }
+  },
+  {
+   "key": "lump",
+   "name": "Khối u, nổi hạch",
+   "synonyms": [
+    "khối u",
+    "nổi u",
+    "nổi cục",
+    "nổi hạch",
+    "sưng hạch",
+    "hạch cổ",
+    "hạch nách",
+    "u vú",
+    "cục ở vú",
+    "tầm soát ung thư"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "ung_buou"
+     ],
+     "secondary": [
+      "ngoai_tong_quat"
+     ]
+    },
+    "child": {
+     "primary": [
+      "nhi"
+     ],
+     "secondary": [
+      "ngoai_tong_quat"
+     ]
+    }
+   }
+  },
+  {
+   "key": "thyroid",
+   "name": "Bướu cổ, tuyến giáp",
+   "synonyms": [
+    "bướu cổ",
+    "tuyến giáp",
+    "cường giáp",
+    "suy giáp",
+    "mắt lồi"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "noi_tiet"
+     ],
+     "secondary": []
+    },
+    "child": {
+     "primary": [
+      "noi_tiet"
+     ],
+     "secondary": []
+    }
+   }
+  },
+  {
+   "key": "diabetes_signs",
+   "name": "Khát nước, tiểu nhiều",
+   "synonyms": [
+    "khát nước nhiều",
+    "khát nước liên tục",
+    "tiểu nhiều",
+    "đường huyết cao",
+    "tiểu đường",
+    "đái tháo đường",
+    "vết thương lâu lành"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "noi_tiet"
+     ],
+     "secondary": []
+    },
+    "child": {
+     "primary": [
+      "noi_tiet"
+     ],
+     "secondary": []
+    }
+   }
+  },
+  {
+   "key": "blood_pressure",
+   "name": "Huyết áp cao, mỡ máu",
+   "synonyms": [
+    "huyết áp cao",
+    "cao huyết áp",
+    "tăng huyết áp",
+    "mỡ máu cao",
+    "rối loạn mỡ máu",
+    "cholesterol cao",
+    "mạch không đều",
+    "tim đập không đều",
+    "loạn nhịp tim"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "tim_mach"
+     ],
+     "secondary": []
+    },
+    "child": {
+     "primary": [
+      "tim_mach"
+     ],
+     "secondary": []
+    }
+   }
+  },
+  {
+   "key": "swelling",
+   "name": "Phù chân, phù mặt",
+   "synonyms": [
+    "phù chân",
+    "sưng phù chân",
+    "phù mặt",
+    "phù người"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "tim_mach",
+      "da_khoa"
+     ],
+     "secondary": []
+    },
+    "child": {
+     "primary": [
+      "nhi"
+     ],
+     "secondary": []
+    }
+   }
+  },
+  {
+   "key": "neck_shoulder",
+   "name": "Đau cổ vai gáy",
+   "synonyms": [
+    "đau cổ vai gáy",
+    "đau vai gáy",
+    "mỏi vai gáy",
+    "đau cổ",
+    "đau vai",
+    "thoái hóa cột sống",
+    "thoát vị đĩa đệm"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "co_xuong_khop"
+     ],
+     "secondary": []
+    },
+    "child": {
+     "primary": [
+      "co_xuong_khop"
+     ],
+     "secondary": []
+    }
+   }
+  },
+  {
+   "key": "injury",
+   "name": "Bong gân, trật khớp, gãy xương",
+   "synonyms": [
+    "bong gân",
+    "trật khớp",
+    "gãy xương",
+    "gãy tay",
+    "gãy chân",
+    "rạn xương",
+    "chấn thương thể thao",
+    "bầm tím",
+    "bong gân cổ chân"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "ngoai_chan_thuong"
+     ],
+     "secondary": [
+      "co_xuong_khop"
+     ]
+    },
+    "child": {
+     "primary": [
+      "ngoai_chan_thuong"
+     ],
+     "secondary": [
+      "co_xuong_khop"
+     ]
+    }
+   }
+  },
+  {
+   "key": "burn",
+   "name": "Bỏng",
+   "synonyms": [
+    "bị bỏng",
+    "bỏng nước sôi",
+    "bỏng lửa",
+    "phỏng"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "ngoai_chan_thuong"
+     ],
+     "secondary": [
+      "da_lieu"
+     ]
+    },
+    "child": {
+     "primary": [
+      "ngoai_chan_thuong"
+     ],
+     "secondary": [
+      "da_lieu"
+     ]
+    }
+   }
+  },
+  {
+   "key": "skin_problem",
+   "name": "Mụn, nấm da, chàm",
+   "synonyms": [
+    "mụn trứng cá",
+    "nổi mụn",
+    "nấm da",
+    "nấm móng",
+    "lang ben",
+    "hắc lào",
+    "chàm",
+    "vảy nến",
+    "sạm da",
+    "nám da",
+    "rụng tóc",
+    "da khô nứt nẻ",
+    "ngứa ngoài da",
+    "tróc vảy"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "da_lieu"
+     ],
+     "secondary": []
+    },
+    "child": {
+     "primary": [
+      "da_lieu"
+     ],
+     "secondary": []
+    }
+   }
+  },
+  {
+   "key": "seizure",
+   "name": "Co giật, động kinh",
+   "synonyms": [
+    "co giật",
+    "động kinh"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "than_kinh"
+     ],
+     "secondary": []
+    },
+    "child": {
+     "primary": [
+      "than_kinh"
+     ],
+     "secondary": []
+    }
+   }
+  },
+  {
+   "key": "mental",
+   "name": "Vấn đề tâm lý",
+   "synonyms": [
+    "trầm cảm",
+    "lo âu",
+    "rối loạn lo âu",
+    "hoảng loạn",
+    "hoảng sợ",
+    "buồn chán kéo dài",
+    "khám tâm lý",
+    "bác sĩ tâm lý",
+    "tâm thần"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "tam_than"
+     ],
+     "secondary": []
+    },
+    "child": {
+     "primary": [
+      "tam_than"
+     ],
+     "secondary": [
+      "nhi"
+     ]
+    }
+   }
+  },
+  {
+   "key": "child_development",
+   "name": "Chậm nói, tăng động",
+   "synonyms": [
+    "chậm nói",
+    "tăng động",
+    "tự kỷ",
+    "kém tập trung",
+    "chậm phát triển"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "tam_than"
+     ],
+     "secondary": []
+    },
+    "child": {
+     "primary": [
+      "tam_than"
+     ],
+     "secondary": [
+      "nhi"
+     ]
+    }
+   }
+  },
+  {
+   "key": "anemia",
+   "name": "Thiếu máu",
+   "synonyms": [
+    "thiếu máu",
+    "da xanh xao",
+    "thiếu sắt",
+    "dễ bầm tím",
+    "chấm xuất huyết"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "da_khoa"
+     ],
+     "secondary": []
+    },
+    "child": {
+     "primary": [
+      "nhi"
+     ],
+     "secondary": []
+    }
+   }
+  },
+  {
+   "key": "dengue",
+   "name": "Nghi sốt xuất huyết",
+   "synonyms": [
+    "sốt xuất huyết",
+    "sốt rét"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "truyen_nhiem"
+     ],
+     "secondary": [
+      "da_khoa"
+     ]
+    },
+    "child": {
+     "primary": [
+      "nhi"
+     ],
+     "secondary": [
+      "truyen_nhiem"
+     ]
+    }
+   }
+  },
+  {
+   "key": "men_health",
+   "name": "Vấn đề nam khoa",
+   "synonyms": [
+    "đau bìu",
+    "sưng bìu",
+    "sưng tinh hoàn",
+    "đau tinh hoàn",
+    "xuất tinh sớm",
+    "rối loạn cương",
+    "yếu sinh lý",
+    "hẹp bao quy đầu",
+    "cắt bao quy đầu"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "da_khoa"
+     ],
+     "secondary": [
+      "ngoai_tong_quat"
+     ]
+    },
+    "child": {
+     "primary": [
+      "nhi"
+     ],
+     "secondary": [
+      "ngoai_tong_quat"
+     ]
+    }
+   }
+  },
+  {
+   "key": "checkup",
+   "name": "Khám tổng quát",
+   "synonyms": [
+    "khám tổng quát",
+    "khám sức khỏe",
+    "khám sức khoẻ",
+    "kiểm tra sức khỏe",
+    "kiểm tra sức khoẻ",
+    "tầm soát sức khỏe",
+    "khám định kỳ"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "da_khoa"
+     ],
+     "secondary": []
+    },
+    "child": {
+     "primary": [
+      "nhi"
+     ],
+     "secondary": []
+    }
+   }
+  },
+  {
+   "key": "rehab",
+   "name": "Châm cứu, phục hồi",
+   "synonyms": [
+    "châm cứu",
+    "bấm huyệt",
+    "đông y",
+    "thuốc bắc",
+    "thuốc nam",
+    "vật lý trị liệu",
+    "phục hồi chức năng"
+   ],
+   "group": "extra",
+   "map": {
+    "adult": {
+     "primary": [
+      "y_hoc_co_truyen"
+     ],
+     "secondary": []
+    },
+    "child": {
+     "primary": [
+      "y_hoc_co_truyen"
+     ],
+     "secondary": []
+    }
+   }
+  }
+ ]
+}

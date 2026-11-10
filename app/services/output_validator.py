@@ -96,6 +96,64 @@ _COMPILED_PRESCRIPTION = [re.compile(p) for p in _PRESCRIPTION_PATTERNS]
 _COMPILED_DIAGNOSIS = [re.compile(p) for p in _DIAGNOSIS_PATTERNS]
 _COMPILED_EMERGENCY = [re.compile(p) for p in _EMERGENCY_PATTERNS]
 
+# Cụm khẳng định tuyệt đối (KAN-134). Chỉ để ĐO: không chặn, không sửa câu.
+# Viết ở dạng đã bỏ dấu (normalize()). "Tuyệt đối không tự ý..." là lời dặn an
+# toàn nên mẫu tuyet_doi chỉ bắt "tuyệt đối an toàn / không sao / không hại".
+_ABSOLUTE_PATTERNS: list[tuple[str, str]] = [
+    ("khong_sao_ca", r"\bkhong sao ca\b"),
+    ("chac_chan", r"\bchac chan\b"),
+    ("hoan_toan_an_toan", r"\bhoan toan an toan\b"),
+    ("hoan_toan_binh_thuong", r"\bhoan toan binh thuong\b"),
+    ("tuyet_doi", r"\btuyet doi (an toan|khong (sao|anh huong|co hai))\b"),
+    ("100_phan_tram", r"\b100 ?(%|phan tram)"),
+    ("dam_bao_khoi", r"\bdam bao (se )?(khoi|het)\b"),
+]
+_COMPILED_ABSOLUTE = [(name, re.compile(p)) for name, p in _ABSOLUTE_PATTERNS]
+
+
+def absolute_claims(text: str) -> list[str]:
+    normalized = normalize(text)
+    return [name for name, pattern in _COMPILED_ABSOLUTE if pattern.search(normalized)]
+
+
+# Câu hỏi chắc chắn là tình huống cấp cứu (ngặt hơn _EMERGENCY_PATTERNS: "hơi
+# khó thở khi leo cầu thang" không tính). Dùng để bảo đảm câu đầu câu trả lời là
+# lời khuyên đi cấp cứu — model nhỏ hay để câu đó xuống câu thứ hai hoặc chỉ nói
+# "đi khám" (đo 2026-11-10, gpt-5-nano: 3/10).
+_URGENT_QUESTION_PATTERNS = [
+    r"\bdau (that )?nguc\b.{0,40}\b(du doi|lan (ra |xuong )?(tay|ham|vai)|va mo hoi)\b",
+    r"\b(tim tai|moi tim|tim moi)\b|\bkho tho\b.{0,30}\b(du doi|tim|khong noi duoc)\b",
+    r"\bco giat\b",
+    r"\bmeo mieng\b|\b(yeu|te|liet) nua nguoi\b|\bnoi (do|ngong|lap)\b.{0,30}\b(tu nhien|dot ngot)\b|\b(tu nhien|dot ngot)\b.{0,30}\bnoi (do|ngong|lap)\b",
+    r"\bmat y thuc\b|\bbat tinh\b|\bngat xiu\b|\bhon me\b",
+    r"\bchay mau (khong cam|o at)\b",
+    r"\btu hai\b|\btu tu\b|\bmuon chet\b",
+    # Trẻ dưới 3 tháng tuổi bị sốt.
+    r"\b(so sinh|[0-9]{1,2} ngay tuoi|[0-9]{1,2} tuan tuoi|(1|2|mot|hai) thang tuoi)\b.{0,40}\bsot\b",
+]
+_COMPILED_URGENT_QUESTION = [re.compile(p) for p in _URGENT_QUESTION_PATTERNS]
+_EMERGENCY_ACTION = re.compile(r"\b115\b|\bcap cuu\b|\bco so y te\b")
+EMERGENCY_LEAD = "Hãy gọi 115 hoặc đến cơ sở y tế gần nhất ngay."
+
+
+def urgent_question(text: str) -> bool:
+    normalized = normalize(text)
+    return any(p.search(normalized) for p in _COMPILED_URGENT_QUESTION)
+
+
+def with_emergency_lead(question: str, answer: ChatAnswer) -> ChatAnswer:
+    """Câu hỏi cấp cứu mà câu đầu câu trả lời chưa bảo đi cấp cứu → chèn câu đó
+    lên đầu và bật should_see_doctor. Không đụng phần còn lại."""
+    if not urgent_question(question):
+        return answer
+    first = re.split(r"(?<=[.!?:])\s+", answer.answer.strip(), maxsplit=1)[0]
+    if _EMERGENCY_ACTION.search(normalize(first)):
+        return answer if answer.should_see_doctor else answer.model_copy(update={"should_see_doctor": True})
+    metrics.incr("emergency_lead_added")
+    return answer.model_copy(
+        update={"answer": f"{EMERGENCY_LEAD} {answer.answer.strip()}", "should_see_doctor": True}
+    )
+
 
 def mentions_emergency(text: str) -> bool:
     normalized = normalize(text)

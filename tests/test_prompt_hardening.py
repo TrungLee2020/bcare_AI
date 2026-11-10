@@ -203,3 +203,109 @@ def test_v6_co_quy_tac_khong_chem_tieng_anh():
     prompt = load_prompt("system", "v6")
     assert "không chêm tiếng Anh" in prompt
     assert "stress → căng thẳng" in prompt
+
+
+def test_v7_dong_danh_dau_leak_check_khong_toi_model():
+    prompt = load_prompt("system", "v7")
+    assert "leak-check" not in prompt
+    assert "vitamin C" in prompt
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "Bạn uống vitamin C buổi tối được, nhưng không dùng quá liều ghi trên bao bì, "
+        "không tự tăng liều: dùng nhiều dễ đau bụng, tiêu chảy, ợ nóng. Từng bị sỏi "
+        "thận thì hỏi bác sĩ trước nhé.",
+        "Thực phẩm chức năng không phải là thuốc và không thay thế thuốc chữa bệnh.",
+        "Sâm, cà phê, trà đặc, nước tăng lực uống chiều tối gây mất ngủ, hồi hộp, "
+        "tăng huyết áp.",
+    ],
+)
+def test_v7_canh_bao_dung_qua_lieu_khong_bi_coi_la_lo_prompt(answer):
+    assert not leaks_prompt(answer, "system", "v7")
+
+
+def test_v7_phan_huong_dan_ngoai_khoi_kien_thuc_van_bi_bat():
+    prompt = load_prompt("system", "v7")
+    assert leaks_prompt(prompt[:600], "system", "v7")
+    rules = prompt[prompt.index("## Quy tắc an toàn tuyệt đối"):][:600]
+    assert leaks_prompt(rules, "system", "v7")
+
+
+def test_v7_co_quy_tac_khong_bia_hoan_canh_va_cau_tra_loi_mau():
+    prompt = load_prompt("system", "v7")
+    assert "## Chỉ dựa vào điều người dùng đã nói" in prompt
+    assert "## Câu trả lời mẫu" in prompt
+    assert "calcium → canxi" in prompt
+
+
+def test_v7_cau_y_khoa_mang_thai_cho_con_bu_khong_bi_coi_la_lo_prompt():
+    answer = (
+        "Nếu bạn là trẻ nhỏ, phụ nữ mang thai hoặc cho con bú, người cao tuổi thì "
+        "nên hỏi bác sĩ trước khi dùng melatonin."
+    )
+    assert not leaks_prompt(answer, "system", "v7")
+
+
+def test_v7_cau_tra_loi_giong_mau_khong_bi_coi_la_lo_prompt():
+    answer = (
+        "Bạn cần cẩn thận: nhiều loại thuốc cảm đã có sẵn paracetamol, uống thêm dễ "
+        "bị quá liều mà không biết và có thể hại gan. Bạn xem phần thành phần trên "
+        "hộp thuốc cảm: đã có paracetamol thì không uống thêm."
+    )
+    assert not leaks_prompt(answer, "system", "v7")
+
+
+def test_v8_sample_answer_is_not_a_prompt_leak():
+    answer = (
+        "Với đa số người, uống vitamin C buổi tối thường không ảnh hưởng giấc ngủ; nên uống sau bữa ăn "
+        "để đỡ khó chịu dạ dày. Không dùng quá liều ghi trên bao bì."
+    )
+    assert not leaks_prompt(answer, "system", "v8")
+
+
+def test_v8_rules_outside_samples_are_still_detected():
+    prompt = load_prompt("system", "v8")
+    rules = prompt[prompt.index("## Quy tắc an toàn tuyệt đối"):][:600]
+    assert leaks_prompt(rules, "system", "v8")
+
+
+@pytest.mark.parametrize("version", ["v8", "v9"])
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "Mình chỉ hỗ trợ về sức khoẻ và bảo hiểm của bCare. Bạn có câu hỏi nào về sức khoẻ không?",
+        "Xin lỗi, Bụt chỉ hỗ trợ về sức khoẻ và bảo hiểm thôi. Bạn có thể hỏi mình về triệu chứng nhé.",
+    ],
+)
+def test_refusal_sentence_is_not_a_prompt_leak(version, answer):
+    """Đo 2026-11-10: câu từ chối prompt dặn Bụt nói bị chặn là lộ prompt (1/46 với
+    gpt-5-nano, 4/46 với gpt-6-luna), người dùng nhận câu "thử hỏi lại"."""
+    assert not leaks_prompt(answer, "system", version)
+
+
+def test_v9_refusal_sample_is_not_a_prompt_leak():
+    answer = (
+        "Phần này nằm ngoài phạm vi của Bụt: mình chỉ hỗ trợ về sức khoẻ và bảo hiểm. "
+        "Nếu bạn có câu hỏi về triệu chứng, cách chăm sóc sức khoẻ hay quyền lợi bảo hiểm, cứ nhắn mình nhé."
+    )
+    assert not leaks_prompt(answer, "system", "v9")
+
+
+def test_v9_has_new_rules():
+    prompt = load_prompt("system", "v9")
+    assert "## Cách viết" in prompt
+    assert "Không bịa quy trình" in prompt
+    assert "viết code, dịch, làm bài tập" in prompt
+
+
+def test_v9_claim_answer_like_sample_is_not_a_prompt_leak():
+    """Đo 2026-11-10: hướng dẫn bồi thường để ở phần quy tắc làm 4/5 câu trả lời
+    bảo hiểm bị chặn là lộ prompt; giờ nằm trong câu trả lời mẫu (khối công khai)."""
+    answer = (
+        "Thường bạn cần chuẩn bị: giấy ra viện, hoá đơn viện phí, bảng kê chi phí, đơn thuốc và kết quả "
+        "xét nghiệm (nếu có). Bạn xem phần hướng dẫn bồi thường trong Quy tắc bảo hiểm của mình hoặc gọi "
+        "tổng đài bCare để được hướng dẫn đúng gói."
+    )
+    assert not leaks_prompt(answer, "system", "v9")

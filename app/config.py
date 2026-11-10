@@ -94,7 +94,12 @@ class Settings(BaseSettings):
 
     # Prompt version đang chạy (file prompts/system_<version>.md).
     # Đổi prompt = đổi biến này, không cần sửa code.
-    prompt_version: str = "v6"
+    prompt_version: str = "v9"
+    # Câu "chỉ tham khảo" App hiển thị cố định dưới mỗi tin của Bụt (KAN-134).
+    chat_disclaimer: str = "Thông tin mang tính tham khảo, không thay thế khám chữa bệnh."
+    # Bật khi App đã hiển thị `disclaimer`: Bụt thôi tự viết câu đó (bỏ khỏi
+    # prompt, xoá nếu model vẫn viết) để không lặp hai lần.
+    chat_disclaimer_in_app: bool = False
     # Chặn câu trả lời dài bất thường (dấu hiệu model lan man hoặc bị dẫn dắt)
     answer_max_chars: int = 2000
 
@@ -194,6 +199,10 @@ class Settings(BaseSettings):
     # /v1/chat: chờ câu trả lời tối đa ngần này giây trong cùng request. Phải
     # lớn hơn thời gian xử lý tối đa của consumer (timeout × số lần thử +
     # backoff), và nhỏ hơn proxy_read_timeout của nginx cho /v1/.
+    # Bất biến cho tin có ảnh (tests/test_documents_timing.py): đọc ảnh
+    # ocr_message_budget_seconds (30) + trả lời có retry (25 × 3 + backoff ≈ 78)
+    # ≤ SHUTDOWN_GRACE_SECONDS của consumer (110) < stop_grace_period (120),
+    # và ≤ v1_answer_timeout_seconds (120).
     v1_answer_timeout_seconds: float = 120.0
     # health_context dài hơn ngần này (JSON) thì cắt — chặn chi phí prompt.
     health_context_max_chars: int = 2000
@@ -206,7 +215,7 @@ class Settings(BaseSettings):
     report_summary_max_chars: int = 1200
 
     # /v1/facility/suggest (KAN-115)
-    facility_prompt_version: str = "v1"
+    facility_prompt_version: str = "v3"
     facility_table: str = "facilities"
     # Bật khi cột facilities.audience đã có trên DB (child / adult / all).
     facility_audience_column: bool = False
@@ -255,6 +264,38 @@ class Settings(BaseSettings):
     # Bearer token để đọc /metrics (số liệu chi phí, lưu lượng). Trống = không
     # cần token (chỉ dành cho dev); production bắt buộc đặt.
     metrics_token: str = ""
+
+    # Đọc ảnh giấy tờ y tế gửi qua chat (OCR).
+    # docs/superpowers/specs/2026-11-06-chat-image-ocr-design.md
+    ocr_enabled: bool = False
+    ocr_classify_model: str = "gpt-5-nano"
+    # Trống = dùng OPENAI_MODEL.
+    ocr_extract_model: str = ""
+    ocr_classify_prompt_version: str = "v1"
+    ocr_extract_prompt_version: str = "v1"
+    # Cạnh dài (px) của ảnh gửi model: phân loại / OCR. Token tính theo điểm ảnh.
+    ocr_classify_side: int = 512
+    ocr_max_side: int = 1280
+    # Mỗi cạnh cắt viền tối đa ngần này phần kích thước.
+    ocr_max_crop_ratio: float = 0.2
+    # Phân loại chắc chắn dưới mức này thì không OCR.
+    ocr_min_confidence: float = 0.6
+    # Ảnh được OCR mỗi ngày mỗi user (mọi gói).
+    ocr_max_per_day: int = 3
+    ocr_max_attachments: int = 3
+    ocr_max_image_bytes: int = 10 * 1024 * 1024
+    # Ảnh đặt tạm trong Redis chờ consumer xử lý.
+    ocr_image_ttl_seconds: int = 3600
+    # Trần cho MỘT lần gọi model đọc ảnh; phải ≤ ocr_message_budget_seconds mới có tác dụng.
+    ocr_llm_budget_seconds: float = 25.0
+    # Tổng thời gian đọc ảnh của MỘT tin (các ảnh đọc song song); quá thì ảnh chưa xong bị đánh failed.
+    # Xem bất biến thời gian ở v1_answer_timeout_seconds.
+    ocr_message_budget_seconds: float = 30.0
+    # Chữ OCR của một phiếu xét nghiệm dài vượt trần chat (openai_max_output_tokens).
+    ocr_max_output_tokens: int = 4000
+    ocr_context_documents: int = 3
+    ocr_context_max_chars: int = 4000
+    storage_bucket: str = "health-documents"
 
     def model_for_question(self, question_no: int | None) -> str:
         """Model cho câu hỏi thứ `question_no` trong ngày của user. None =

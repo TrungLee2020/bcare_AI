@@ -11,6 +11,9 @@ from app.kafka.producer import publish_chat_response, publish_dead_letter
 from app.redis_client import get_redis
 from app.schemas import ChatRequestMessage, ChatResponseMessage, DeadLetterMessage
 from app.services import answering, history, idempotency, quota
+from app.services.documents import context as documents_context
+from app.services.documents import pipeline as documents_pipeline
+from app.services.documents import replies as documents_replies
 from app.sse import replay
 
 logger = logging.getLogger(__name__)
@@ -70,15 +73,48 @@ async def _deliver(response: ChatResponseMessage) -> None:
     await publish_chat_response(response)
 
 
+def _documents_only(message: ChatRequestMessage) -> bool:
+    return bool(message.document_ids) and not message.content.strip()
+
+
+async def _record_documents_only(message: ChatRequestMessage) -> None:
+    """Tin chỉ có ảnh: API đã trả câu "đã nhận" cho app, không ai chờ response.
+    Chỉ ghi lượt vào lịch sử (để app mở lại hội thoại thấy ảnh) và cache cho
+    lần Kafka giao lại."""
+    response = _notice(message, "ok", documents_replies.received_answer(len(message.document_ids)))
+    await idempotency.save_response(get_redis(), message.request_id, response.model_dump(mode="json"))
+    try:
+        await history.record_turn(message, response)
+    except Exception:
+        logger.exception("Ghi lịch sử thất bại request_id=%s", message.request_id)
+
+
+async def _document_context(message: ChatRequestMessage) -> str | None:
+    try:
+        return await documents_context.for_conversation(message.session_id, message.user_id)
+    except Exception:
+        # Thiếu ngữ cảnh ảnh thì vẫn trả lời được; không biến lỗi DB thành lỗi OpenAI.
+        logger.exception("Nạp ngữ cảnh tài liệu thất bại request_id=%s", message.request_id)
+        return None
+
+
 async def _handle(message: ChatRequestMessage) -> None:
     """Xử lý 1 câu hỏi: sinh câu trả lời, cache lại cho retry, publish sang
     chat_responses."""
     redis = get_redis()
+    if message.document_ids and not message.content.strip():
+        await documents_pipeline.process_all(redis, message.document_ids)
+        await _record_documents_only(message)
+        return
     slow_notice = asyncio.create_task(_notify_slow(message))
     try:
+        await documents_pipeline.process_all(redis, message.document_ids)
         context = await history.load_context(message)
         response = await answering.answer_question(
-            message, context, settings.model_for_question(message.question_no)
+            message,
+            context,
+            settings.model_for_question(message.question_no),
+            document_context=await _document_context(message),
         )
     except Exception as exc:
         # Tới đây là đã retry hết số lần cho phép (xem app/services/retry.py).
@@ -179,7 +215,9 @@ async def _process_record(record) -> None:
         return
 
     age = (datetime.now(timezone.utc) - message.created_at).total_seconds()
-    if age > settings.request_max_age_seconds:
+    # Tin chỉ có ảnh không bị coi là hết hạn: nó không có lượt chat để hoàn, và
+    # ảnh cũ tự kết thúc là failed/image_expired trong pipeline.
+    if age > settings.request_max_age_seconds and not _documents_only(message):
         await _expire(message, age)
         return
 
@@ -208,6 +246,7 @@ async def _expire(message: ChatRequestMessage, age: float) -> None:
         settings.request_max_age_seconds,
     )
     metrics.incr("requests_expired")
+    await documents_pipeline.fail_unfinished(message.document_ids, "expired")
     await quota.refund(get_redis(), message.user_id, charged_at=message.created_at)
     response = _notice(message, "error", answering.ERROR_ANSWER, "expired")
     await idempotency.save_response(get_redis(), message.request_id, response.model_dump(mode="json"))
@@ -219,6 +258,11 @@ async def _give_up(record) -> None:
     chờ mãi. Chỉ là "cố": hạ tầng có thể vẫn đang hỏng."""
     try:
         message = ChatRequestMessage.model_validate_json(record.value)
+        if _documents_only(message):
+            # Không có lượt chat nào bị trừ và không ai chờ response.
+            await documents_pipeline.fail_unfinished(message.document_ids, "processing_failed")
+            return
+        await documents_pipeline.fail_unfinished(message.document_ids, "processing_failed")
         await quota.refund(get_redis(), message.user_id, charged_at=message.created_at)
         await _deliver(_notice(message, "error", answering.ERROR_ANSWER, "processing_failed"))
     except Exception:
@@ -270,9 +314,11 @@ async def _process_with_retry(record) -> None:
 
 
 # Chờ message đang xử lý dở xong trước khi tắt / trả partition. Phải lớn hơn
-# thời gian xử lý tối đa của 1 message (timeout OpenAI × số lần thử + backoff),
-# và nhỏ hơn terminationGracePeriodSeconds của k8s.
-SHUTDOWN_GRACE_SECONDS = 90.0
+# thời gian xử lý tối đa của 1 message, và nhỏ hơn stop_grace_period của
+# docker-compose (120s) / terminationGracePeriodSeconds của k8s. Tin có ảnh:
+# đọc ảnh ocr_message_budget_seconds (30) + trả lời có retry (25 × 3 + backoff
+# ≈ 78) ≤ 110 < 120 (tests/test_documents_timing.py).
+SHUTDOWN_GRACE_SECONDS = 110.0
 # Phải lớn hơn SHUTDOWN_GRACE_SECONDS, xem chỗ dùng trong `_consume_loop`.
 REBALANCE_TIMEOUT_MS = int((SHUTDOWN_GRACE_SECONDS + 30) * 1000)
 # Vòng đọc lỗi (Kafka chưa sẵn sàng lúc boot, mất kết nối...) thì thử lại sau

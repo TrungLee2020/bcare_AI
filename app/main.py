@@ -19,6 +19,7 @@ from app.redis_client import start_redis, stop_redis
 from app.services import cost
 from app.services.history import start_purge, stop_purge
 from app.services.consent import stop_consent_client
+from app.services.documents.storage import stop_storage_client
 from app.services.facility.facilities import stop_facility_client
 from app.services.openai_client import start_openai, stop_openai
 from app.schemas import ChatRequestMessage
@@ -141,6 +142,7 @@ async def lifespan(app: FastAPI):
     await stop_producer()
     await stop_openai()
     await stop_consent_client()
+    await stop_storage_client()
     await stop_facility_client()
     await stop_db()
     await stop_redis()
