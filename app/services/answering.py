@@ -108,6 +108,8 @@ async def answer_question(
         metrics.incr("output_blocked")
         return _response(outcome.answer, "blocked", outcome.detail, usage)
 
+    outcome.answer = output_validator.with_emergency_lead(message.content, outcome.answer)
+
     claims = output_validator.absolute_claims(outcome.answer.answer)
     if claims:
         metrics.incr("answer_absolute_claim")

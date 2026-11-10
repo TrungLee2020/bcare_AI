@@ -43,6 +43,11 @@ ALLOWED_PHRASES = (
     # Cụm y khoa thông thường, có trong prompt từ v4. Đo với system_v7 +
     # gpt-5-nano 2026-11-05: 1/36 câu trả lời về melatonin bị chặn nhầm vì nó.
     "phụ nữ mang thai hoặc cho con bú",
+    # Câu từ chối prompt dặn Bụt nói. Đo 2026-11-10 (system_v8): 1/46 câu trả lời
+    # gpt-5-nano và 4/46 gpt-6-luna bị chặn nhầm vì chép câu này, người dùng nhận
+    # câu "thử hỏi lại" thay cho lời từ chối.
+    "chỉ hỗ trợ về sức khoẻ và bảo hiểm của bCare",
+    "chỉ hỗ trợ về sức khoẻ và bảo hiểm",
 )
 
 # Như trên, cho prompt báo cáo tháng (report_v1). Thiếu các câu này thì đoạn
