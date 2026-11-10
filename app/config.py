@@ -94,7 +94,7 @@ class Settings(BaseSettings):
 
     # Prompt version đang chạy (file prompts/system_<version>.md).
     # Đổi prompt = đổi biến này, không cần sửa code.
-    prompt_version: str = "v8"
+    prompt_version: str = "v9"
     # Câu "chỉ tham khảo" App hiển thị cố định dưới mỗi tin của Bụt (KAN-134).
     chat_disclaimer: str = "Thông tin mang tính tham khảo, không thay thế khám chữa bệnh."
     # Bật khi App đã hiển thị `disclaimer`: Bụt thôi tự viết câu đó (bỏ khỏi
