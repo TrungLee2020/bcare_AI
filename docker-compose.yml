@@ -34,9 +34,10 @@ services:
     restart: unless-stopped
     # Lớn hơn SHUTDOWN_GRACE_SECONDS của consumer (110s), để message đang dở
     # kịp chạy xong và consumer kịp rời group trước khi bị SIGKILL. Bất biến:
-    # đọc ảnh (30s) + trả lời có retry (~78s) ≈ 108s ≤ 110s < 120s; cộng
-    # --timeout-graceful-shutdown 10s của uvicorn (Dockerfile) vẫn ≤ 120s.
-    stop_grace_period: 120s
+    # đọc ảnh (30s) + trả lời có retry (~78s) ≈ 108s ≤ 110s. Tắt tuần tự:
+    # uvicorn --timeout-graceful-shutdown 10s (Dockerfile) rồi consumer tối đa
+    # 110s = 120s, cộng thời gian rời group / commit / đóng DB → 130s để còn dư.
+    stop_grace_period: 130s
 
   postgres:
     image: postgres:16-alpine
